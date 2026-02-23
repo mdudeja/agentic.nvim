@@ -42,10 +42,6 @@ return {
           return "<C-i>"
         end
       end, { desc = "Accept Copilot NES suggestion", expr = true })
-
-      vim.keymap.set("n", "<esc>", function()
-        require("copilot-lsp.nes").clear()
-      end, { desc = "Clear Copilot suggestion or fallback", remap = true })
     end,
   },
   {
@@ -76,7 +72,7 @@ return {
         -- }
       },
       sources = {
-        default = { "copilot", "lsp", "path", "snippets", "buffer" },
+        default = { "copilot", "lsp", "path", "snippets", "buffer", "omni" },
         providers = {
           copilot = {
             name = "copilot",

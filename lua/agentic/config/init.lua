@@ -10,6 +10,7 @@
 ---@field providerConfig table<Agentic.config.provider?, Agentic.config.providerConfig?>?
 ---@field ui Edgy.Config?
 ---@field win Agentic.config.win?
+---@field keys table<string, { action: string|fun(self: Agentic.ui.main), desc: string, mode: string|string[]? }>?
 local M = {}
 
 ---@type Agentic.config
@@ -42,10 +43,9 @@ local defaults = {
         width = 0.4,
       },
       filter = function(buf, win)
-        return vim.bo[buf].filetype == "agentic"
-            and vim.api.nvim_win_get_config(win).relative == "editor"
+        return vim.bo[buf].filetype == "agentic" and vim.api.nvim_win_get_config(win).relative == "editor"
       end,
-    }
+    },
   },
 
   --- @type Agentic.config.win
@@ -58,7 +58,13 @@ local defaults = {
     resize = true,
     stack = true,
     relative = "editor",
-  }
+    minimal = false,
+    fixbuf = true,
+  },
+
+  keys = {
+    { ["<leader>ct"] = { action = "toggle", desc = "Toggle Agentic UI", mode = { "n", "t" } } },
+  },
 }
 
 M.options = nil
