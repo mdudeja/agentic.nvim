@@ -1,17 +1,27 @@
 ---@class Agentic
 local M = {}
+local cache = {}
+
+setmetatable(M, {
+  __index = function(_, key)
+    if cache[key] then
+      return cache[key]
+    end
+    local modname = "agentic." .. key
+    local ok, mod = pcall(require, modname)
+    if ok then
+      cache[key] = mod
+      return mod
+    else
+      error("Module not found: " .. modname)
+    end
+  end,
+})
 
 ---@param options Agentic.config?
 function M.setup(options)
-  local config = require("agentic.config")
-  config.setup(options)
-
-  M.config = config
-
-  local commands = require("agentic.commands")
-  commands.setup()
+  require("agentic.config").setup(options)
+  require("agentic.commands").setup()
 end
-
-M.setup()
 
 return M

@@ -8,7 +8,6 @@ This is a simple neovim plugin that allows you to interact with the the followin
 
 ## External Plugins (Should already exist in your neovim setup)
 
-- snacks ("folke/snacks.nvim")
 - edgy ("folke/edgy.nvim")
 - Treesitter ("nvim-treesitter/nvim-treesitter")
 - Copilot LSP should already be installed and configured

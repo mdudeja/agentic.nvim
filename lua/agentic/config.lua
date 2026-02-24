@@ -2,7 +2,17 @@
 ---@field cmd string[]
 
 ---@alias Agentic.config.provider "copilot" | "opencode" | "gemini"
----@class Agentic.config.win : snacks.win.Config
+---@class Agentic.config.win
+---@field ft string
+---@field show boolean?
+---@field enter boolean?
+---@field position string?
+---@field border table?
+---@field resize boolean?
+---@field stack boolean?
+---@field relative string?
+---@field minimal boolean?
+---@field fixbuf boolean?
 
 ---@class Agentic.config
 ---@field debug boolean?
@@ -58,7 +68,7 @@ local defaults = {
     resize = true,
     stack = true,
     relative = "editor",
-    minimal = false,
+    minimal = true,
     fixbuf = true,
   },
 
@@ -67,20 +77,8 @@ local defaults = {
   },
 }
 
-M.options = nil
-
-function M.setup(opts)
-  M.options = vim.tbl_deep_extend("force", defaults, opts or {})
+function M.setup(options)
+  M.options = vim.tbl_deep_extend("force", defaults, options or {})
 end
-
-setmetatable(M, {
-  __index = function(_, key)
-    if M.options == nil then
-      return vim.deepcopy(defaults)[key]
-    end
-
-    return M.options[key]
-  end,
-})
 
 return M
