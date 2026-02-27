@@ -7,6 +7,7 @@ function M.setup(options)
   require("agentic.state").setup()
   require("agentic.commands").setup()
   require("agentic.autocmds").setup()
+  require("agentic.keymaps").setup()
 end
 
 return M
