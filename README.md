@@ -8,11 +8,8 @@ This is a simple neovim plugin that allows you to interact with the the followin
 
 ## External Plugins (Should already exist in your neovim setup)
 
-- edgy ("folke/edgy.nvim")
 - Treesitter ("nvim-treesitter/nvim-treesitter")
-- Copilot LSP should already be installed and configured
 - Gitsigns
-- Lualine
 
 ## Plugin Dependencies (These will be automatically installed by the plugin via lazy.nvim configuration)
 
@@ -25,7 +22,7 @@ This is a simple neovim plugin that allows you to interact with the the followin
 
 - Autocompletion support using blink-cmp and blink-copilot
 - NES (Next Edit Suggestion) support using copilot-lsp
-- TUI integration using edgy and snacks
+- TUI integration in a dedicated terminal window for interacting with the CLIs.
 - TUI window can simply be a terminal laid out using edgy and activated with the appropriate command - copilot, opencode or gemini.
 - Context ingestion using Treesitter to provide better suggestions based on the current code context. This can be done via:
   - `:` -> insert files using snacks picker (multiple files can be selected)
@@ -45,5 +42,27 @@ This is a simple neovim plugin that allows you to interact with the the followin
   - `an` -> accept the change and move to the next change
   - `dn` -> reject the change and move to the next change
 - Keyboard Shortcuts help UI. A quick way to ask the agent "how can I" style question.
-- Lualine integration to show things like remaining quota, selected provider, current model etc.
+- Custom statusline integration to show things like remaining quota, selected provider, current model etc.
 - A way to see the currently active agents.
+
+## Statusline
+
+The plugin sets a custom statusline for the agentic window that displays:
+- Provider icon and name (e.g., "󰚩 COPILOT gpt-4")
+- Terminal status (● ACTIVE / ○ INACTIVE)
+- Remaining quota/tokens (if available)
+- Line/column position and percentage through file
+
+If you're using Lualine, you may want to disable it for the agentic filetype:
+
+```lua
+require('lualine').setup {
+  options = {
+    disabled_filetypes = {
+      statusline = { 'agentic' },
+    },
+    -- ... rest of your options
+  }
+}
+```
+

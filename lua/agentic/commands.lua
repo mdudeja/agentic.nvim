@@ -5,7 +5,7 @@ local ui = require("agentic.ui.main")
 
 function M.setup()
   vim.api.nvim_create_user_command("AgenticToggle", function()
-    ui.toggle()
+    ui.get():toggle()
   end, {
     desc = "Toggle Agentic window",
     nargs = 0,

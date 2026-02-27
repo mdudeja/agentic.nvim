@@ -2,13 +2,13 @@
 
 ## 1. Feasibility Analysis
 
-The proposed features for `agentic.nvim` rely on a combination of existing Neovim plugins (`snacks.nvim`, `edgy.nvim`, `nvim-treesitter`, `blink.cmp`) and external CLI tools (`copilot`, `opencode`, `gemini`). Below is an assessment of each core feature:
+The proposed features for `agentic.nvim` rely on a combination of existing Neovim plugins (`snacks`, `nvim-treesitter`, `blink.cmp`) and external CLI tools (`copilot`, `opencode`, `gemini`). Below is an assessment of each core feature:
 
 ### Core Components & Dependencies
 
-- **TUI Integration (Edgy & Snacks)**:
-  - **Feasibility**: High. `edgy.nvim` is designed for managing sidebar/bottombar windows, including terminals. `snacks.terminal` or `snacks.win` can easily spawn the CLI processes.
-  - **Approach**: Create a dedicated toggleable terminal window managed by Edgy. The content of this terminal will be the REPL or interactive session of the selected CLI tool.
+- **TUI Integration**:
+  - **Feasibility**: High.
+  - **Approach**: Create a dedicated toggleable terminal window. The content of this terminal will be the REPL or interactive session of the selected CLI tool.
 
 - **Context Ingestion (Pickers & @-mentions)**:
   - **Feasibility**: High. `snacks.picker` provides a robust interface for selecting files, buffers, and grep results.
@@ -34,12 +34,10 @@ The proposed features for `agentic.nvim` rely on a combination of existing Neovi
 
 ### Phase 1: Core Structure & TUI Setup
 
-**Goal**: Get a working terminal window docked with `edgy` that runs a dummy command or one of the CLIs.
+**Goal**: Get a working terminal window that runs a dummy command or one of the CLIs.
 
 1.  **Project Scaffold**: Setup `lua/agentic/init.lua`, `lua/agentic/config.lua`.
-2.  **Edgy Integration**: Define an `edgy` layout configuration that includes a custom "Agentic" window.
-3.  **Terminal Management**: Use a dedicated `edgy` layout to manage the agent's terminal window, providing better control over window behavior and process lifecycle.
-4.  **Provider Status**: Implement a Lualine component to display the currently selected provider and model, delegating selection and configuration to the underlying CLI's TUI.
+2.  **Provider Status**: Implement a Statusline component to display the currently selected provider and model, delegating selection and configuration to the underlying CLI's TUI.
 
 ### Phase 2: Context Ingestion System
 
@@ -74,7 +72,7 @@ The proposed features for `agentic.nvim` rely on a combination of existing Neovi
 
 ### Phase 5: Polish & UX
 
-1.  **Lualine Component**: Status indicator for active agent and token usage (if available via API).
+1.  **Statusline Component**: Status indicator for active agent and token usage (if available via API).
 2.  **Keymap Help**: A floating window showing available `@` commands.
 3.  **Configuration**: Expose setup options for accepted CLIs and default behaviors.
 
