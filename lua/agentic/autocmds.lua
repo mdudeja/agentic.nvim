@@ -12,7 +12,7 @@ function M.setup()
         group = group,
         callback = function(args)
             local state = util.getState()
-            if args.buf ~= state.main_buffer then
+            if args.buf ~= state.chat_buffer then
                 return
             end
 
@@ -23,12 +23,7 @@ function M.setup()
 
                 local main = ui.get()
                 local provider = config.options.provider
-                local provider_config = config.options.providerConfig[provider]
-
-                if provider_config and provider_config.cmd then
-                    local cmd = table.concat(provider_config.cmd, " ")
-                    main:start_terminal(cmd)
-                end
+                main:start_rpc_server(provider)
             end)
         end,
     })
@@ -38,14 +33,14 @@ function M.setup()
         group = group,
         callback = function()
             local state = util.getState()
-            if not state.main_window or not vim.api.nvim_win_is_valid(state.main_window) then
+            if not state.chat_window or not vim.api.nvim_win_is_valid(state.chat_window) then
                 return
             end
 
             vim.schedule(function()
                 local main = ui.get()
                 if main.opts and main.opts.resize then
-                    main:resize("main")
+                    main:resize("chat")
                 end
             end)
         end,
@@ -56,12 +51,12 @@ function M.setup()
         group = group,
         callback = function(args)
             local state = util.getState()
-            if args.buf ~= state.main_buffer then
+            if args.buf ~= state.chat_buffer then
                 return
             end
 
             vim.schedule(function()
-                state.update("main_buffer", nil)
+                state.update("chat_buffer", nil)
                 state.update("term_opened", false)
             end)
         end,
@@ -74,10 +69,10 @@ function M.setup()
             local state = util.getState()
             local closed_win = tonumber(args.match)
 
-            if closed_win == state.main_window then
+            if closed_win == state.chat_window then
                 vim.schedule(function()
-                    state.update("is_visible", { main = false })
-                    state.update("main_window", nil)
+                    state.update("is_visible", { chat = false })
+                    state.update("chat_window", nil)
                 end)
             end
         end,
@@ -88,12 +83,12 @@ function M.setup()
         group = group,
         callback = function(args)
             local state = util.getState()
-            if args.buf ~= state.main_buffer then
+            if args.buf ~= state.chat_buffer then
                 return
             end
 
             vim.schedule(function()
-                state.update("is_visible", { main = false })
+                state.update("is_visible", { chat = false })
             end)
         end,
     })
@@ -103,11 +98,11 @@ function M.setup()
         group = group,
         callback = function()
             local state = util.getState()
-            if not state.term_opened or not state.main_buffer or not vim.api.nvim_buf_is_valid(state.main_buffer) then
+            if not state.term_opened or not state.chat_buffer or not vim.api.nvim_buf_is_valid(state.chat_buffer) then
                 return
             end
 
-            local job_id = state.terminal_job_id
+            local job_id = state.rpc_job_id
             if job_id then
                 vim.fn.jobstop(job_id)
             end

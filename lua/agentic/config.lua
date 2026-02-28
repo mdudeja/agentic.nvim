@@ -1,5 +1,8 @@
 ---@class Agentic.config.providerConfig
 ---@field cmd string[]
+---@field list_sessions_cmd table? -- e.g. ["opencode", "--list-sessions"]
+---@field start_named_session_cmd (fun(name: string): string[])? -- returns a command table for the name
+---@field resume_session_cmd (fun(id: string): string[])? -- returns a command table for resuming by ID
 
 ---@class Agentic.config.win.size
 ---@field width number?
@@ -32,15 +35,23 @@ local defaults = {
   debug = false,
 
   -- Default provider
-  provider = "copilot",
+  provider = "opencode",
 
   -- Provider configurations
   providerConfig = {
     copilot = {
       cmd = { "copilot" },
+      -- Add commands when Copilot's CLI session arguments are available
     },
     opencode = {
       cmd = { "opencode" },
+      list_sessions_cmd = { "opencode", "--list-sessions" },
+      start_named_session_cmd = function(name)
+        return { "opencode", "--session", name }
+      end,
+      resume_session_cmd = function(id)
+        return { "opencode", "--session", id }
+      end,
     },
     gemini = {
       cmd = { "gemini" },
