@@ -1,162 +1,194 @@
-import { PROVIDERS, ProviderClient } from './src/providers/index'
-import { createSession, addMessage, getMessages } from './src/history/db'
+import type { ASMState } from 'src/state'
+import { type PROVIDERS, ProviderClient } from './src/acp/Client'
+import { createSession, addMessage, getMessages } from './src/database/db'
 import { ContextIngester, type NeovimContext } from './src/ingester/index'
-import * as readline from 'readline'
+import { respond, notify } from './src/utils/messaging'
+import * as readline from 'readline/promises'
 
-// Setup stdio JSON-RPC interface for Neovim
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-  terminal: false,
-})
+export type ASMMethod = 'init' | 'ask' | 'get_history'
 
-let activeProvider: ProviderClient | null = null
-let activeSessionId: string | null = null
-
-// Helper to send JSON-RPC responses back to Neovim
-function respond(id: string | number, result: any, error?: any) {
-  process.stdout.write(
-    JSON.stringify({
-      jsonrpc: '2.0',
-      id,
-      result: error ? undefined : result,
-      error: error
-        ? { code: -32000, message: error.message || String(error) }
-        : undefined,
-    }) + '\n',
-  )
+export type ASMPayloadParams = {
+  config?: ASMState
+  query?: {
+    prompt: string
+    contexts?: NeovimContext[]
+  }
 }
 
-// Helper to send server push notifications back to Neovim
-function notify(method: string, params: any) {
-  process.stdout.write(
-    JSON.stringify({
-      jsonrpc: '2.0',
-      method,
-      params,
-    }) + '\n',
-  )
+export type ASMPayload = {
+  jsonrpc: '2.0'
+  id: string | number
+  method: ASMMethod
+  params: ASMPayloadParams
 }
 
-rl.on('line', async (line) => {
-  if (!line.trim()) return
+export class AgenticServer {
+  static instance: AgenticServer | null = null
+  private activeProvider: ProviderClient | null = null
+  private activeSessionId: string | null = null
+  private rl: readline.Interface | null = null
 
-  try {
-    const payload = JSON.parse(line)
-    if (payload.jsonrpc !== '2.0' || !payload.method) return
+  constructor() {
+    this._setup()
+      .then(() => {
+        console.log('[AgenticServer] Initialized successfully.')
+      })
+      .catch((err) => {
+        console.error('[AgenticServer] Initialization failed:', err)
+      })
+  }
 
-    const { method, params, id } = payload
-
-    switch (method) {
-      case 'init':
-        // Initialize or change the active provider
-        const providerId = params.provider || 'copilot'
-        const pConfig = PROVIDERS[providerId]
-        if (!pConfig) throw new Error(`Unknown provider: ${providerId}`)
-
-        if (activeProvider) {
-          await activeProvider.disconnect()
-        }
-
-        activeProvider = new ProviderClient(pConfig)
-        const capabilities = await activeProvider.connect()
-
-        // Create or resume the local history session
-        activeSessionId = (params.sessionId ||
-          `session_${Date.now()}`) as string
-        createSession(
-          activeSessionId,
-          providerId,
-          params.sessionName as string | undefined,
-        )
-
-        respond(id, {
-          success: true,
-          sessionId: activeSessionId,
-          provider: providerId,
-          capabilities,
-        })
-        break
-
-      case 'ask':
-        if (!activeProvider)
-          throw new Error("No provider initialized. Call 'init' first.")
-        if (!activeSessionId) throw new Error('No active session.')
-
-        const userPrompt = params.prompt
-        const contexts: NeovimContext[] = params.contexts || []
-
-        // Ingest Contexts
-        const ingester = new ContextIngester(activeSessionId)
-        const synthesizedPrompt = await ingester.synthesizePrompt(
-          userPrompt,
-          contexts,
-        )
-
-        // Record User Message Locally
-        addMessage(activeSessionId, 'user', synthesizedPrompt)
-
-        // Fetch ACP Connection
-        const conn = activeProvider.getConnection()
-
-        notify('chat_stream', {
-          text: `(Forwarding to ACP Agent)\n\n`,
-        })
-
-        // Call Provider utilizing official ACP Protocol
-        try {
-          let streamedResponse = ''
-
-          // Listen to asynchronous Text chunks and pipe to Neovim UI + Local Buffer
-          activeProvider!.onSessionUpdate = (text: string) => {
-            streamedResponse += text
-            notify('chat_stream', {
-              text: text,
-            })
-          }
-
-          await conn.prompt({
-            sessionId: activeSessionId,
-            prompt: [
-              {
-                type: 'text',
-                text: synthesizedPrompt,
-              },
-            ],
-          })
-
-          // Generation concluded successfully
-          addMessage(
-            activeSessionId,
-            'assistant',
-            streamedResponse || '(No content returned)',
-          )
-
-          respond(id, { success: true })
-        } catch (e) {
-          notify('chat_stream', {
-            text: `\n\n**Agent Error:** ${e}\n`,
-          })
-          respond(id, null, e)
-        }
-        break
-
-      case 'get_history':
-        if (!params.sessionId) throw new Error('sessionId required')
-        const history = getMessages(params.sessionId)
-        respond(id, { history })
-        break
-
-      default:
-        throw new Error(`Unknown method: ${method}`)
+  static getInstance() {
+    if (!AgenticServer.instance) {
+      AgenticServer.instance = new AgenticServer()
     }
-  } catch (err) {
-    // If it's a request (has id), send an error response. Otherwise log.
-    // However, since we're using stdio, avoid raw console.error breaking Neovim's JSON parser unless wrapped.
-    const errObj = err as Error
-    notify('log', {
-      level: 'error',
-      message: errObj.message || String(errObj),
+    return AgenticServer.instance
+  }
+
+  getRl() {
+    if (!this.rl) {
+      throw new Error('Readline interface not initialized yet.')
+    }
+    return this.rl
+  }
+
+  private async _setup() {
+    console.log('[AgenticServer] Starting Agentic Server...')
+    this.rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: false,
+    })
+
+    this.rl.on('line', async (line) => {
+      if (!line.trim()) return
+
+      try {
+        const payload: ASMPayload = JSON.parse(line)
+        if (payload.jsonrpc !== '2.0' || !payload.method) return
+
+        const { method } = payload
+
+        switch (method) {
+          case 'init':
+            await this._init(payload)
+            break
+
+          case 'ask':
+            await this._ask(payload)
+            break
+
+          case 'get_history':
+            await this._getHistory(payload)
+            break
+
+          default:
+            throw new Error(`Unknown method: ${method}`)
+        }
+      } catch (err) {
+        const errObj = err as Error
+        notify('log', {
+          level: 'error',
+          message: errObj.message || String(errObj),
+        })
+      }
+    })
+    console.log('[AgenticServer] Server setup complete. Awaiting commands...')
+  }
+
+  private async _init(payload: ASMPayload) {
+    const providerId = payload.params.provider || 'copilot'
+
+    if (this.activeProvider) {
+      this.activeProvider.disconnect()
+    }
+
+    this.activeProvider = new ProviderClient(providerId)
+    const { agentCapabilities } = await this.activeProvider.connect()
+
+    this.activeSessionId = payload.params.sessionId || `session_${Date.now()}`
+    createSession(
+      this.activeSessionId,
+      providerId,
+      payload.params.sessionName as string | undefined,
+    )
+
+    respond(payload.id, {
+      success: true,
+      sessionId: this.activeSessionId,
+      provider: providerId,
+      capabilities: agentCapabilities,
     })
   }
-})
+
+  private async _ask(payload: ASMPayload) {
+    if (!this.activeProvider || !this.activeSessionId) {
+      throw new Error("No provider initialized. Call 'init' first.")
+    }
+
+    const userPrompt = payload.params.prompt || ''
+    const contexts: NeovimContext[] = payload.params.contexts || []
+
+    // Ingest Contexts
+    const ingester = new ContextIngester(this.activeSessionId)
+    const synthesizedPrompt = await ingester.synthesizePrompt(
+      userPrompt,
+      contexts,
+    )
+
+    // Record User Message Locally
+    addMessage(this.activeSessionId, 'user', synthesizedPrompt)
+
+    // Fetch ACP Connection
+    const conn = this.activeProvider.getConnection()
+
+    notify('chat_stream', {
+      text: `(Forwarding to ACP Agent)\n\n`,
+    })
+
+    // Call Provider utilizing official ACP Protocol
+    try {
+      let streamedResponse = ''
+
+      // Listen to asynchronous Text chunks and pipe to Neovim UI + Local Buffer
+      this.activeProvider.onSessionUpdate = (text: string) => {
+        streamedResponse += text
+        notify('chat_stream', {
+          text: text,
+        })
+      }
+
+      await conn.prompt({
+        sessionId: this.activeSessionId,
+        prompt: [
+          {
+            type: 'text',
+            text: synthesizedPrompt,
+          },
+        ],
+      })
+
+      // Generation concluded successfully
+      addMessage(
+        this.activeSessionId,
+        'assistant',
+        streamedResponse || '(No content returned)',
+      )
+
+      respond(payload.id, { success: true })
+    } catch (e) {
+      notify('chat_stream', {
+        text: `\n\n**Agent Error:** ${e}\n`,
+      })
+      respond(payload.id, null, e)
+    }
+  }
+
+  private async _getHistory(payload: ASMPayload) {
+    if (!payload.params.sessionId) {
+      throw new Error('sessionId is required for get_history')
+    }
+    const history = getMessages(payload.params.sessionId)
+    respond(payload.id, { history })
+  }
+}
