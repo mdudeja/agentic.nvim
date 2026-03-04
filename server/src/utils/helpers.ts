@@ -4,7 +4,8 @@
  */
 
 import type { ICommsInterface } from 'src/comms/ICommsInterface'
-import { logError } from './logger'
+import { logError, logTraffic } from './logger'
+import type { Stream } from '@agentclientprotocol/sdk'
 
 export function generateCatchblock(
   commsInterface: ICommsInterface | null,
@@ -23,4 +24,32 @@ export function generateCatchblock(
       message: `${failMessage}: ${errObj.message || String(errObj)}`,
     },
   })
+}
+
+export function tapStream(stream: Stream): Stream {
+  const sendTap = new TransformStream({
+    transform(chunk: unknown, controller: TransformStreamDefaultController) {
+      logTraffic('send', '', chunk)
+      controller.enqueue(chunk)
+    },
+  })
+
+  const receiveTap = new TransformStream({
+    transform(chunk: unknown, controller: TransformStreamDefaultController) {
+      logTraffic('receive', '', chunk)
+      controller.enqueue(chunk)
+    },
+  })
+
+  sendTap.readable.pipeTo(stream.writable).catch((err) => {
+    logError('Error piping sendTap', err)
+  })
+  stream.readable.pipeTo(receiveTap.writable).catch((err) => {
+    logError('Error piping receiveTap', err)
+  })
+
+  return {
+    readable: receiveTap.readable,
+    writable: sendTap.writable,
+  }
 }

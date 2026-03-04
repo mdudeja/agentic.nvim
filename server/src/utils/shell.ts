@@ -26,7 +26,7 @@ export function spawnShellCommand({
     cmd: [shell, ...shellArgs],
     cwd,
     env: { ...process.env, ...env },
-    stdio: ['pipe', 'pipe', 'inherit'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   })
 
   return subprocess

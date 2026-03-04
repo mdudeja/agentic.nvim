@@ -3,4 +3,6 @@ export enum AgentEventNames {
   loaded = 'agent.loaded',
   spawned = 'agent.spawned',
   killed = 'agent.killed',
+  // message = 'agent.message',
+  // error = 'agent.error',
 }

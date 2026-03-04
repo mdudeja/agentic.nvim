@@ -64,7 +64,7 @@ function formatMessage(
                 return `${arg.name}: ${arg.message}\n${arg.stack}`
               }
               try {
-                return JSON.stringify(arg)
+                return JSON.stringify(arg, null, 2)
               } catch {
                 return String(arg)
               }
@@ -171,7 +171,7 @@ export function logDebug(message: string, ...args: unknown[]): void {
  */
 export function logTraffic(
   direction: 'send' | 'receive',
-  message: string,
+  message: unknown,
   ...args: unknown[]
 ): void {
   if (!LOG_TRAFFIC) {

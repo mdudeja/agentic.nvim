@@ -13,9 +13,6 @@ import { ASMPayloadSchema } from 'src/openrpc/schemas'
 import { Check, Errors } from 'typebox/value'
 import { ReadlineCommsInterface } from 'src/comms/ReadlineCommsInterface'
 import { WebsocketCommsInterface } from 'src/comms/WebsocketCommsInterface'
-import { TerminalHandler } from 'src/acp/handlers/TerminalHandler'
-import { PermissionHandler } from 'src/acp/handlers/PermissionHandler'
-import { FileSystemHandler } from 'src/acp/handlers/FileSystemHandler'
 import { ASMStateManager } from 'src/state'
 
 export class AgenticServer {
@@ -23,10 +20,6 @@ export class AgenticServer {
   private stateManager: ASMStateManager | null = null
   private commsInterface: ICommsInterface | null = null
   private agentManager: AgentManager | null = null
-
-  private fileSystemHandler: FileSystemHandler | null = null
-  private permissionHandler: PermissionHandler | null = null
-  private terminalHandler: TerminalHandler | null = null
 
   static getInstance() {
     if (!AgenticServer.instance) {
@@ -43,10 +36,6 @@ export class AgenticServer {
     try {
       this.stateManager = new ASMStateManager()
       this._initCommsInterface(config)
-
-      this.fileSystemHandler = new FileSystemHandler()
-      this.permissionHandler = new PermissionHandler(this)
-      this.terminalHandler = new TerminalHandler(this)
 
       logWarning('Server setup complete. Awaiting commands...')
     } catch (err) {
@@ -70,18 +59,6 @@ export class AgenticServer {
     if (!AgenticServer.instance) {
       logInfo('AgenticServer instance already disposed.')
       return
-    }
-
-    if (this.permissionHandler) {
-      this.permissionHandler.dispose()
-    }
-
-    if (this.terminalHandler) {
-      this.terminalHandler.dispose()
-    }
-
-    if (this.fileSystemHandler) {
-      this.fileSystemHandler.dispose()
     }
 
     if (this.stateManager) {
@@ -146,7 +123,11 @@ export class AgenticServer {
     )
 
     if (!this.agentManager) {
-      this.agentManager = new AgentManager(Providers[providerId], resolvedCwd)
+      this.agentManager = new AgentManager(
+        Providers[providerId],
+        resolvedCwd,
+        this,
+      )
     }
 
     this.agentManager.on(AgentEventNames.loaded, (agent) => {
@@ -166,7 +147,7 @@ export class AgenticServer {
       this.agentManager?.spawn()
     })
 
-    this.agentManager.on(AgentEventNames.spawned, (agent) => {
+    this.agentManager.on(AgentEventNames.spawned, async (agent) => {
       if (!agent) {
         logError('Spawned event received without agent data')
         const err = new Error('Failed to spawn agent')
@@ -182,6 +163,20 @@ export class AgenticServer {
       this.commsInterface?.respond({
         id: null,
         result: { success: true, agentId: agent.id },
+      })
+
+      if (!this.agentManager) {
+        logError('AgentManager not initialized when handling spawned event')
+        return
+      }
+
+      const { connection, client, initResponse } =
+        await this.agentManager.connect()
+
+      this.stateManager?.setItem('connection', {
+        csc: connection,
+        client,
+        initResponse,
       })
     })
 
@@ -201,6 +196,7 @@ export class AgenticServer {
 
       logDebug(`Agent with ID ${agent.id} was killed`)
       this.stateManager?.deleteItem('agent')
+      this.stateManager?.deleteItem('connection')
     })
 
     this.agentManager.init()
@@ -229,7 +225,7 @@ export class AgenticServer {
         break
 
       case 'client/terminal':
-        this.terminalHandler?.handleResponse(payload.data.params)
+        this.agentManager?.handleTerminalResponse(payload.data.params)
         break
 
       default:

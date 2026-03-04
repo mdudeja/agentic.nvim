@@ -1,25 +1,47 @@
+import {
+  ClientSideConnection,
+  ndJsonStream,
+  type Agent as AcpAgent,
+  PROTOCOL_VERSION,
+} from '@agentclientprotocol/sdk'
 import { and, desc, eq } from 'drizzle-orm'
+import type { AgenticServer } from 'main'
 import EventEmitter from 'node:events'
+import { AcpClient } from 'src/acp/Client'
+import { FileSystemHandler } from 'src/acp/handlers/FileSystemHandler'
+import { PermissionHandler } from 'src/acp/handlers/PermissionHandler'
+import { TerminalHandler } from 'src/acp/handlers/TerminalHandler'
 import { AgentEventNames } from 'src/data/events'
 import { Providers, PROVIDERS } from 'src/data/providers'
 import { AgenticDB } from 'src/database/AgenticDB'
 import { agents, type Agent } from 'src/database/schemas'
+import type { ASMPayloadParams } from 'src/openrpc/schemas'
 import type { ASMState } from 'src/state/IASMState'
+import { tapStream } from 'src/utils/helpers'
 import { logDebug, logError } from 'src/utils/logger'
 import { spawnShellCommand } from 'src/utils/shell'
 
 export class AgentManager extends EventEmitter {
-  private db: typeof AgenticDB.prototype.db
+  private db: ReturnType<AgenticDB['getDB']> | null = null
   private agent: ASMState['agent'] | null = null
+
+  private fileSystemHandler: FileSystemHandler
+  private permissionHandler: PermissionHandler
+  private terminalHandler: TerminalHandler
 
   constructor(
     private provider: Providers,
     private cwd: string,
+    private readonly server_instance: AgenticServer,
   ) {
     super()
 
     const dbInstance = AgenticDB.getInstance()
     this.db = dbInstance.getDB()
+
+    this.fileSystemHandler = new FileSystemHandler()
+    this.permissionHandler = new PermissionHandler(this.server_instance)
+    this.terminalHandler = new TerminalHandler(this.server_instance)
   }
 
   public async init() {
@@ -71,6 +93,132 @@ export class AgentManager extends EventEmitter {
     })
 
     this.emit(AgentEventNames.spawned, this.agent)
+
+    // const process = this.agent.process
+
+    // ;(async () => {
+    //   if (!process.stdout || typeof process.stdout === 'number') {
+    //     logError(`No stdout stream for agent ${this.agent?.id}`)
+    //     return
+    //   }
+    //   const decoder = new TextDecoder()
+    //   let buffer = ''
+
+    //   try {
+    //     for await (const chunk of process.stdout) {
+    //       buffer += decoder.decode(chunk)
+
+    //       const lines = buffer.split('\n')
+    //       buffer = lines.pop()! // keep any incomplete trailing line
+
+    //       for (const line of lines) {
+    //         if (!line.trim()) continue
+    //         this.emit(AgentEventNames.message, line)
+    //       }
+    //     }
+    //   } catch (err) {
+    //     logDebug(`Agent stdout stream closed for agent ${this.agent?.id}:`, err)
+    //   }
+    // })()
+
+    // ;(async () => {
+    //   if (!process.stderr || typeof process.stderr === 'number') {
+    //     logError(`No stderr stream for agent ${this.agent?.id}`)
+    //     return
+    //   }
+    //   const decoder = new TextDecoder()
+    //   let buffer = ''
+
+    //   try {
+    //     for await (const chunk of process.stderr) {
+    //       buffer += decoder.decode(chunk)
+
+    //       const lines = buffer.split('\n')
+    //       buffer = lines.pop()! // keep any incomplete trailing line
+
+    //       for (const line of lines) {
+    //         if (!line.trim()) continue
+    //         this.emit(AgentEventNames.message, line)
+    //       }
+    //     }
+    //   } catch (err) {
+    //     logDebug(`Agent stdout stream closed for agent ${this.agent?.id}:`, err)
+    //   }
+    // })()
+  }
+
+  public async connect() {
+    if (!this.agent) {
+      throw new Error('Agent is not initialized')
+    }
+
+    if (!this.agent.process) {
+      throw new Error('Agent process is not running')
+    }
+
+    logDebug(`Connecting to agent ${this.agent.id}`)
+
+    const { stdin, stdout } = this.agent.process
+    if (
+      !stdout ||
+      typeof stdout === 'number' ||
+      !stdin ||
+      typeof stdin === 'number'
+    ) {
+      throw new Error(
+        `Agent process for agent ${this.agent.id} does not have valid stdio streams`,
+      )
+    }
+
+    // FileSink → WritableStream<Uint8Array> adapter
+    const writableStdin = new WritableStream<Uint8Array>({
+      write(chunk) {
+        stdin.write(chunk)
+      },
+      close() {
+        stdin.end()
+      },
+      abort() {
+        stdin.end()
+      },
+    })
+
+    const stream = ndJsonStream(writableStdin, stdout)
+    const tappedStream = tapStream(stream)
+
+    const client = new AcpClient(
+      this.fileSystemHandler,
+      this.permissionHandler,
+      this.terminalHandler,
+    )
+
+    const connection = new ClientSideConnection((agent: AcpAgent) => {
+      client.setAgent(agent)
+      return client
+    }, tappedStream)
+
+    //Initialize the connection
+    const initResponse = await connection.initialize({
+      protocolVersion: PROTOCOL_VERSION,
+      clientInfo: {
+        name: 'Neovim Agentic Client',
+        version: '0.1',
+      },
+      clientCapabilities: {
+        fs: {
+          readTextFile: true,
+          writeTextFile: true,
+        },
+        terminal: true,
+      },
+    })
+
+    logDebug(`Connection initialized with response:`, initResponse)
+    return { connection, client, initResponse }
+  }
+
+  public handleTerminalResponse(msg: ASMPayloadParams['client/terminal']) {
+    this.terminalHandler.handleResponse(msg)
   }
 
   public kill() {
@@ -90,6 +238,18 @@ export class AgentManager extends EventEmitter {
   }
 
   dispose() {
+    if (this.permissionHandler) {
+      this.permissionHandler.dispose()
+    }
+
+    if (this.terminalHandler) {
+      this.terminalHandler.dispose()
+    }
+
+    if (this.fileSystemHandler) {
+      this.fileSystemHandler.dispose()
+    }
+
     this.removeAllListeners()
     this.kill()
     this.agent = null
