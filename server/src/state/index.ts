@@ -1,39 +1,33 @@
-import type { Subprocess } from 'bun'
-import type { Agent, Session } from 'src/database/schemas'
+import type { ASMState, IASMState } from './IASMState'
 
-export interface ASMState {
-  agent: Agent['Select'] & {
-    process?: Subprocess
+export class ASMStateManager implements IASMState {
+  private state: ASMState = {}
+
+  setItem(key: keyof ASMState, value: any): void {
+    this.state[key] = value
   }
-  session?: Session['Select']
-}
 
-const state: ASMState = {} as ASMState
-
-export function setStateItem<K extends keyof ASMState>(
-  key: K,
-  value: ASMState[K],
-) {
-  state[key] = value
-}
-
-export function getStateItem<K extends keyof ASMState>(
-  key: K,
-): ASMState[K] | undefined {
-  return state[key]
-}
-
-export function updateStateItem<K extends keyof ASMState>(
-  key: K,
-  value: Partial<ASMState[K]>,
-) {
-  if (!state[key]) {
-    state[key] = value as ASMState[K]
-  } else {
-    state[key] = { ...state[key], ...value }
+  updateItem(key: keyof ASMState, value: any): void {
+    if (this.state[key]) {
+      this.state[key] = { ...this.state[key], ...value }
+    } else {
+      this.state[key] = value
+    }
   }
-}
 
-export function getState() {
-  return state
+  deleteItem(key: keyof ASMState): void {
+    delete this.state[key]
+  }
+
+  getItem(key: keyof ASMState) {
+    return this.state[key]
+  }
+
+  getState(): ASMState {
+    return this.state
+  }
+
+  dispose() {
+    this.state = {}
+  }
 }

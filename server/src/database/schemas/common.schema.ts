@@ -1,4 +1,4 @@
-import { getNowMillis } from '../../utils/datetimeUtils'
+import { getNowMillis } from '../../utils/datetime'
 import * as t from 'drizzle-orm/sqlite-core'
 import { createId } from '@paralleldrive/cuid2'
 import type { Providers } from 'src/data/providers'
@@ -38,6 +38,18 @@ export const providerSchema = {
   provider_title: t.text().notNull(),
   provider_command: t.text().notNull(),
   provider_args: t.text({ mode: 'json' }).$type<string[]>().notNull(),
+}
+
+export enum GlobalPermissionsRule {
+  allow = 'allow',
+  deny = 'deny',
+  ask = 'ask',
+}
+
+export const agentPermissionsSchema = {
+  permissions_rule: customEnum<GlobalPermissionsRule>('permissions_rule')
+    .notNull()
+    .default(GlobalPermissionsRule.ask),
 }
 
 export enum SessionStatus {

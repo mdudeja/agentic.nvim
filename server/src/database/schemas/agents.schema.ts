@@ -1,11 +1,16 @@
 import { index, sqliteTable, text } from 'drizzle-orm/sqlite-core'
-import { baseSchema, providerSchema } from './common.schema'
+import {
+  agentPermissionsSchema,
+  baseSchema,
+  providerSchema,
+} from './common.schema'
 
 export const agents = sqliteTable(
   'agents',
   {
     ...baseSchema,
     ...providerSchema,
+    ...agentPermissionsSchema,
     cwd: text().notNull(),
     env: text({ mode: 'json' }).$type<Record<string, string>>(),
   },

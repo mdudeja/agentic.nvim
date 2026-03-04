@@ -1,10 +1,13 @@
 import { Database } from 'bun:sqlite'
 import { dirname } from 'node:path'
+
 import * as schema from './schemas'
 import { existsSync, mkdirSync } from 'node:fs'
 import { drizzle, SQLiteBunDatabase } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import { defineRelations } from 'drizzle-orm'
+import { resolvePath } from 'src/utils/paths'
+import { logDebug } from 'src/utils/logger'
 
 export class AgenticDB {
   db: SQLiteBunDatabase<typeof schema> | null = null
@@ -44,14 +47,16 @@ export class AgenticDB {
       throw new Error('Database file path is not set')
     }
 
-    const dbDir = dirname(this.dbFilePath)
+    const resolvedPath = resolvePath(this.dbFilePath)
+
+    const dbDir = dirname(resolvedPath)
 
     if (!existsSync(dbDir)) {
-      console.log(`Creating database directory at ${dbDir}`)
+      logDebug(`Creating database directory at ${dbDir}`)
       mkdirSync(dbDir, { recursive: true })
     }
 
-    const sqlite = new Database(this.dbFilePath, { create: true, strict: true })
+    const sqlite = new Database(resolvedPath, { create: true, strict: true })
 
     sqlite.run('PRAGMA foreign_keys = ON;')
     sqlite.run('PRAGMA journal_mode = WAL;')
@@ -61,15 +66,17 @@ export class AgenticDB {
 
     this.db = drizzle({
       client: sqlite,
+      schema,
       relations,
     })
 
-    const migrationsDir =
-      process.env.DB_MIGRATIONS_DIR || './drizzle_migrations'
+    const migrationsDir = resolvePath(
+      process.env.DB_MIGRATIONS_DIR || './drizzle_migrations',
+    )
 
     migrate(this.db, { migrationsFolder: migrationsDir })
     this.dbReady = true
-    console.log('Database initialized and migrations applied')
+    logDebug('Database initialized and migrations applied')
 
     return this.db
   }

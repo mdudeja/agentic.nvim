@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "93b30f74-44cd-4714-94e4-45cb4676d912",
+  "id": "8b5634bd-4d62-4125-bf90-001469635101",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -96,6 +96,16 @@
       "type": "text",
       "notNull": true,
       "autoincrement": false,
+      "default": "'ask'",
+      "generated": null,
+      "name": "permissions_rule",
+      "entityType": "columns",
+      "table": "agents"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
       "default": null,
       "generated": null,
       "name": "cwd",
@@ -106,7 +116,7 @@
       "type": "text",
       "notNull": false,
       "autoincrement": false,
-      "default": "'{}'",
+      "default": null,
       "generated": null,
       "name": "env",
       "entityType": "columns",

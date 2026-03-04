@@ -6,8 +6,9 @@ CREATE TABLE `agents` (
 	`provider_title` text NOT NULL,
 	`provider_command` text NOT NULL,
 	`provider_args` text NOT NULL,
+	`permissions_rule` text DEFAULT 'ask' NOT NULL,
 	`cwd` text NOT NULL,
-	`env` text DEFAULT '{}'
+	`env` text
 );
 --> statement-breakpoint
 CREATE TABLE `messages` (

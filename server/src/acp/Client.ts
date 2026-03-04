@@ -1,93 +1,79 @@
 import * as acp from '@agentclientprotocol/sdk'
-import type { InitializeResponse } from '@agentclientprotocol/sdk'
-import { spawn, type ChildProcess } from 'child_process'
-import { Readable, Writable } from 'node:stream'
-import type { PROVIDERS } from 'src/data/providers'
+import type { FileSystemHandler } from 'src/acp/handlers/FileSystemHandler'
+import type { PermissionHandler } from 'src/acp/handlers/PermissionHandler'
+import type { TerminalHandler } from 'src/acp/handlers/TerminalHandler'
+import { logDebug } from 'src/utils/logger'
 
-export type ProviderConfig = (typeof PROVIDERS)[keyof typeof PROVIDERS]
+export class AcpClient implements acp.Client {
+  private agent: acp.Agent | null = null
 
-export class ProviderClient implements acp.Client {
-  private config: ProviderConfig
-  private connection: acp.ClientSideConnection | null = null
-  private process: ChildProcess | null = null
+  constructor(
+    private readonly fsHandler: FileSystemHandler,
+    private readonly permissionHandler: PermissionHandler,
+    private readonly terminalHandler: TerminalHandler,
+  ) {}
 
-  public onSessionUpdate?: (text: string) => void
-
-  constructor(name: keyof typeof PROVIDERS) {
-    this.config = PROVIDERS[name]
+  setAgent(agent: acp.Agent) {
+    this.agent = agent
   }
 
-  public async connect(): Promise<acp.InitializeResponse> {
-    console.log(
-      `[Provider] Spawning ${this.config.name} via ${this.config.command} ${this.config.args.join(' ')}`,
-    )
-
-    this.process = spawn(this.config.command, this.config.args, {
-      env: process.env,
-      stdio: ['pipe', 'pipe', 'inherit'], // stdin, stdout, stderr (passed to host)
-    })
-
-    if (!this.process.stdout || !this.process.stdin) {
-      throw new Error(`Failed to establish stdio for ${this.config.name}`)
-    }
-
-    // Bind ACP Streams (Converting Node Streams to Web Streams for the SDK)
-    const webStdout = Readable.toWeb(
-      this.process.stdout,
-    ) as unknown as ReadableStream<Uint8Array>
-    const webStdin = Writable.toWeb(
-      this.process.stdin,
-    ) as unknown as WritableStream<Uint8Array>
-    const stream = ndJsonStream(webStdout, webStdin)
-
-    // Instantiate ACP Connection passing the Client handler scaffold
-    const _this = this
-    this.connection = new ClientSideConnection((agent) => {
-      return {
-        async sessionUpdate(params: any) {
-          if (params.update?.sessionUpdate === 'agent_message_chunk') {
-            const content = params.update.content
-            if (content?.type === 'text' && content.text) {
-              if (_this.onSessionUpdate) {
-                _this.onSessionUpdate(content.text)
-              }
-            }
-          }
-        },
-        async requestPermission() {
-          return { outcome: { outcome: 'cancelled' } } as any
-        },
-      } as any
-    }, stream)
-
-    // Initialize ACP Handshake
-    const capabilities = await this.connection.initialize({
-      clientInfo: {
-        name: 'agentic.nvim',
-        version: '1.0.0',
-      },
-      protocolVersion: 1,
-    })
-
-    console.log(
-      `[Provider] Initialized ${this.config.name} over ACP. Options:`,
-      capabilities,
-    )
-    return capabilities
+  getAgent(): acp.Agent | null {
+    return this.agent
   }
 
-  public async disconnect(): Promise<void> {
-    if (this.process) {
-      this.process.kill()
-      this.process = null
-    }
-    this.connection = null
+  async requestPermission(
+    params: acp.RequestPermissionRequest,
+  ): Promise<acp.RequestPermissionResponse> {
+    return this.permissionHandler.requestPermission(params)
   }
 
-  public getConnection(): ClientSideConnection {
-    if (!this.connection) {
-      throw new Error('Connection not established')
-    }
-    return this.connection
+  async sessionUpdate(params: acp.SessionNotification): Promise<void> {
+    logDebug('Session update:', params)
+  }
+
+  /* File system operations */
+
+  async readTextFile(
+    params: acp.ReadTextFileRequest,
+  ): Promise<acp.ReadTextFileResponse> {
+    return this.fsHandler.readTextFile(params)
+  }
+
+  async writeTextFile(
+    params: acp.WriteTextFileRequest,
+  ): Promise<acp.WriteTextFileResponse> {
+    return this.fsHandler.writeTextFile(params)
+  }
+
+  /* Terminal operations */
+
+  async createTerminal(
+    params: acp.CreateTerminalRequest,
+  ): Promise<acp.CreateTerminalResponse> {
+    return this.terminalHandler.createTerminal(params)
+  }
+
+  async terminalOutput(
+    params: acp.TerminalOutputRequest,
+  ): Promise<acp.TerminalOutputResponse> {
+    return this.terminalHandler.terminalOutput(params)
+  }
+
+  async waitForTerminalExit(
+    params: acp.WaitForTerminalExitRequest,
+  ): Promise<acp.WaitForTerminalExitResponse> {
+    return this.terminalHandler.waitForTerminalExit(params)
+  }
+
+  async killTerminal(
+    params: acp.KillTerminalCommandRequest,
+  ): Promise<acp.KillTerminalCommandResponse> {
+    return this.terminalHandler.killTerminal(params)
+  }
+
+  async releaseTerminal(
+    params: acp.ReleaseTerminalRequest,
+  ): Promise<acp.ReleaseTerminalResponse | void> {
+    return this.terminalHandler.releaseTerminal(params)
   }
 }

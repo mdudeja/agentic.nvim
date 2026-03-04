@@ -1,0 +1,952 @@
+{
+  "openrpc": "1.2.6",
+  "info": {
+    "title": "Agentic Server",
+    "description": "JSON-RPC 2.0 interface between the Neovim plugin client and the Agentic server.\n\nAll messages are wrapped in the envelope:\n```json\n{ \"jsonrpc\": \"2.0\", \"data\": { \"method\": \"<method>\", \"params\": { ... } } }\n```\n\n**CLIENT → SERVER** methods are sent by the Neovim plugin.\n**SERVER → CLIENT** methods are notifications pushed by the server.",
+    "version": "0.1.0"
+  },
+  "methods": [
+    {
+      "name": "client/init",
+      "summary": "Initialize the agent for the current workspace",
+      "description": "Creates and spawns an agent using the specified AI provider in the given working directory. Must be called before any other client/* methods. Responds with success and the spawned agent ID.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "summary": "AI provider to use",
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "copilot"
+              },
+              {
+                "type": "string",
+                "const": "opencode"
+              },
+              {
+                "type": "string",
+                "const": "gemini"
+              }
+            ]
+          }
+        },
+        {
+          "name": "cwd",
+          "required": true,
+          "summary": "Absolute path to the workspace root",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "sessionName",
+          "required": false,
+          "summary": "Optional human-readable name for the session",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "InitResult",
+        "schema": {
+          "type": "object",
+          "required": [
+            "success",
+            "agentId"
+          ],
+          "properties": {
+            "success": {
+              "type": "boolean"
+            },
+            "agentId": {
+              "type": "string",
+              "description": "Stable ID of the spawned agent"
+            }
+          }
+        }
+      },
+      "examples": [
+        {
+          "name": "copilot init",
+          "params": [
+            {
+              "name": "provider",
+              "value": "copilot"
+            },
+            {
+              "name": "cwd",
+              "value": "/home/user/my-project"
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": {
+              "success": true,
+              "agentId": "cm9abc123def456"
+            }
+          }
+        },
+        {
+          "name": "gemini init with session name",
+          "params": [
+            {
+              "name": "provider",
+              "value": "gemini"
+            },
+            {
+              "name": "cwd",
+              "value": "/home/user/my-project"
+            },
+            {
+              "name": "sessionName",
+              "value": "refactor-auth"
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": {
+              "success": true,
+              "agentId": "cm9xyz789ghi012"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "client/dispose",
+      "summary": "Dispose the active agent and clean up resources",
+      "description": "Terminates the spawned agent and releases any associated resources. Should be called when the session is complete or the user wants to reset. Responds with success.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "reason",
+          "required": false,
+          "summary": "Optional reason for disposal",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "DisposeResult",
+        "schema": {
+          "type": "object",
+          "required": [
+            "success"
+          ],
+          "properties": {
+            "success": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "examples": [
+        {
+          "name": "dispose with reason",
+          "params": [
+            {
+              "name": "reason",
+              "value": "Session complete"
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": {
+              "success": true
+            }
+          }
+        },
+        {
+          "name": "dispose without reason",
+          "params": [],
+          "result": {
+            "name": "result",
+            "value": {
+              "success": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "client/ask",
+      "summary": "Send a prompt to the active agent",
+      "description": "Forwards a user prompt (with optional Neovim context snippets) to the spawned agent. Requires a prior successful `client/init`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "prompt",
+          "required": true,
+          "summary": "The user's question or instruction",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "contexts",
+          "required": false,
+          "summary": "Optional Neovim context objects to attach to the prompt",
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "type",
+                "content"
+              ],
+              "properties": {
+                "type": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "selection"
+                    },
+                    {
+                      "type": "string",
+                      "const": "file"
+                    },
+                    {
+                      "type": "string",
+                      "const": "workspace"
+                    },
+                    {
+                      "type": "string",
+                      "const": "keymaps"
+                    },
+                    {
+                      "type": "string",
+                      "const": "diagnostics"
+                    }
+                  ]
+                },
+                "content": {
+                  "type": "string"
+                },
+                "metadata": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^.*$": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "AskResult",
+        "schema": {
+          "type": "object",
+          "required": [
+            "success"
+          ],
+          "properties": {
+            "success": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "examples": [
+        {
+          "name": "plain prompt",
+          "params": [
+            {
+              "name": "prompt",
+              "value": "Explain what this function does"
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": {
+              "success": true
+            }
+          }
+        },
+        {
+          "name": "prompt with file context",
+          "params": [
+            {
+              "name": "prompt",
+              "value": "Refactor this to use async/await"
+            },
+            {
+              "name": "contexts",
+              "value": [
+                {
+                  "type": "selection",
+                  "content": "function fetchData(url) {\n  return fetch(url).then(r => r.json())\n}",
+                  "metadata": {
+                    "filePath": "src/api.ts",
+                    "startLine": 12,
+                    "endLine": 14
+                  }
+                }
+              ]
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": {
+              "success": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "client/get_history",
+      "summary": "Retrieve message history for a session",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "sessionId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "HistoryResult",
+        "schema": {
+          "type": "object",
+          "required": [
+            "history"
+          ],
+          "properties": {
+            "history": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "role",
+                  "content"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "assistant"
+                    ]
+                  },
+                  "content": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "examples": [
+        {
+          "name": "get history",
+          "params": [
+            {
+              "name": "sessionId",
+              "value": "sess_abc123"
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": {
+              "history": [
+                {
+                  "role": "user",
+                  "content": "Explain this code"
+                },
+                {
+                  "role": "assistant",
+                  "content": "This function does X..."
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "client/answer",
+      "summary": "Reply to a question sent by the server via `agentic/question`",
+      "description": "The server pauses and sends an `agentic/question` notification when the agent needs user input. Supply the answer here, referencing the same `questionId`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "questionId",
+          "required": true,
+          "summary": "ID of the question (from the `agentic/question` notification)",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "answer",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "AnswerResult",
+        "schema": {
+          "type": "object",
+          "required": [
+            "success"
+          ],
+          "properties": {
+            "success": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "examples": [
+        {
+          "name": "confirm a permission",
+          "params": [
+            {
+              "name": "questionId",
+              "value": "q_xyz789"
+            },
+            {
+              "name": "answer",
+              "value": "yes"
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": {
+              "success": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "client/terminal",
+      "summary": "Send a terminal operation response back to the server",
+      "description": "The server sends `agentic/terminal` notifications requesting terminal actions (create, get_output, wait_exit, kill, release). The client performs the action and replies with the result, matching `requestId`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "requestId",
+          "required": true,
+          "summary": "Matches the `requestId` from the originating `agentic/terminal` notification",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "error",
+          "required": false,
+          "summary": "Set if the terminal operation failed",
+          "schema": {}
+        },
+        {
+          "name": "response",
+          "required": true,
+          "summary": "Discriminated union keyed on `request`",
+          "schema": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "request",
+                  "params"
+                ],
+                "properties": {
+                  "request": {
+                    "type": "string",
+                    "const": "create"
+                  },
+                  "params": {
+                    "type": "object",
+                    "required": [
+                      "terminalId"
+                    ],
+                    "properties": {
+                      "terminalId": {
+                        "type": "string"
+                      },
+                      "jobId": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "request",
+                  "params"
+                ],
+                "properties": {
+                  "request": {
+                    "type": "string",
+                    "const": "get_output"
+                  },
+                  "params": {
+                    "type": "object",
+                    "required": [
+                      "stdout",
+                      "stderr"
+                    ],
+                    "properties": {
+                      "stdout": {
+                        "type": "string"
+                      },
+                      "stderr": {
+                        "type": "string"
+                      },
+                      "exitStatus": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": true
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "request",
+                  "params"
+                ],
+                "properties": {
+                  "request": {
+                    "type": "string",
+                    "const": "wait_exit"
+                  },
+                  "params": {
+                    "type": "object",
+                    "required": [
+                      "exitStatus"
+                    ],
+                    "properties": {
+                      "exitStatus": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "request",
+                  "params"
+                ],
+                "properties": {
+                  "request": {
+                    "type": "string",
+                    "const": "kill"
+                  },
+                  "params": {
+                    "type": "object",
+                    "required": [
+                      "success"
+                    ],
+                    "properties": {
+                      "success": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "request",
+                  "params"
+                ],
+                "properties": {
+                  "request": {
+                    "type": "string",
+                    "const": "release"
+                  },
+                  "params": {
+                    "type": "object",
+                    "required": [
+                      "success"
+                    ],
+                    "properties": {
+                      "success": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "NotificationResult",
+        "schema": {
+          "type": "null",
+          "description": "Fire-and-forget — no response"
+        }
+      },
+      "examples": [
+        {
+          "name": "create terminal response",
+          "params": [
+            {
+              "name": "requestId",
+              "value": "req_001"
+            },
+            {
+              "name": "response",
+              "value": {
+                "request": "create",
+                "params": {
+                  "terminalId": "term_abc",
+                  "jobId": 42
+                }
+              }
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": null
+          }
+        },
+        {
+          "name": "get_output response",
+          "params": [
+            {
+              "name": "requestId",
+              "value": "req_002"
+            },
+            {
+              "name": "response",
+              "value": {
+                "request": "get_output",
+                "params": {
+                  "stdout": "Hello, world!\n",
+                  "stderr": "",
+                  "truncated": false
+                }
+              }
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "agentic/log",
+      "summary": "[Server → Client] Log message notification",
+      "description": "Pushed by the server to stream log output to the Neovim plugin. Not a request — no response expected.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "level",
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "info"
+              },
+              {
+                "type": "string",
+                "const": "warn"
+              },
+              {
+                "type": "string",
+                "const": "error"
+              }
+            ]
+          },
+          "required": true
+        },
+        {
+          "name": "message",
+          "schema": {
+            "type": "string"
+          },
+          "required": true
+        }
+      ],
+      "result": {
+        "name": "NotificationResult",
+        "schema": {
+          "type": "null",
+          "description": "Notification — no response expected"
+        }
+      },
+      "examples": [
+        {
+          "name": "info log",
+          "params": [
+            {
+              "name": "level",
+              "value": "info"
+            },
+            {
+              "name": "message",
+              "value": "Agent spawned successfully"
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "agentic/terminal",
+      "summary": "[Server → Client] Request a terminal operation in Neovim",
+      "description": "The server needs to execute a shell command. Sends this notification requesting the Neovim plugin to manage the terminal lifecycle. The client must respond with `client/terminal` matching the `requestId`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "request",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "create",
+              "get_output",
+              "wait_exit",
+              "kill",
+              "release"
+            ]
+          },
+          "required": true
+        },
+        {
+          "name": "params",
+          "schema": {
+            "oneOf": [
+              {
+                "title": "create",
+                "type": "object",
+                "required": [
+                  "requestId",
+                  "terminalId",
+                  "command"
+                ],
+                "properties": {
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "terminalId": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "string"
+                  },
+                  "cwd": {
+                    "type": "string"
+                  },
+                  "env": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": true
+                    }
+                  },
+                  "outputByteLimit": {
+                    "type": "number"
+                  }
+                }
+              },
+              {
+                "title": "get_output",
+                "type": "object",
+                "required": [
+                  "requestId",
+                  "terminalId"
+                ],
+                "properties": {
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "terminalId": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "title": "wait_exit",
+                "type": "object",
+                "required": [
+                  "requestId",
+                  "terminalId"
+                ],
+                "properties": {
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "terminalId": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "title": "kill",
+                "type": "object",
+                "required": [
+                  "requestId",
+                  "terminalId",
+                  "signal"
+                ],
+                "properties": {
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "terminalId": {
+                    "type": "string"
+                  },
+                  "signal": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "title": "release",
+                "type": "object",
+                "required": [
+                  "requestId",
+                  "terminalId"
+                ],
+                "properties": {
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "terminalId": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          },
+          "required": true
+        }
+      ],
+      "result": {
+        "name": "NotificationResult",
+        "schema": {
+          "type": "null",
+          "description": "Notification — client responds via client/terminal"
+        }
+      },
+      "examples": [
+        {
+          "name": "create terminal",
+          "params": [
+            {
+              "name": "request",
+              "value": "create"
+            },
+            {
+              "name": "params",
+              "value": {
+                "requestId": "req_001",
+                "terminalId": "term_abc",
+                "command": "npm test",
+                "cwd": "/home/user/my-project"
+              }
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": null
+          }
+        },
+        {
+          "name": "kill terminal",
+          "params": [
+            {
+              "name": "request",
+              "value": "kill"
+            },
+            {
+              "name": "params",
+              "value": {
+                "requestId": "req_005",
+                "terminalId": "term_abc",
+                "signal": "SIGTERM"
+              }
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "agentic/question",
+      "summary": "[Server → Client] Ask the user a question and await their answer",
+      "description": "Sent by the server when the agent requires interactive input. The Neovim plugin displays the question and calls `client/answer` with the matching `questionId`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "questionId",
+          "schema": {
+            "type": "string"
+          },
+          "required": false,
+          "summary": "Unique ID to correlate the answer — include in the `client/answer` call"
+        },
+        {
+          "name": "question",
+          "schema": {
+            "type": "string"
+          },
+          "required": true
+        }
+      ],
+      "result": {
+        "name": "NotificationResult",
+        "schema": {
+          "type": "null",
+          "description": "Notification — client responds via client/answer"
+        }
+      },
+      "examples": [
+        {
+          "name": "permission question",
+          "params": [
+            {
+              "name": "questionId",
+              "value": "q_xyz789"
+            },
+            {
+              "name": "question",
+              "value": "Allow the agent to delete files in /tmp/build? (yes/no)"
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": null
+          }
+        }
+      ]
+    }
+  ]
+}
