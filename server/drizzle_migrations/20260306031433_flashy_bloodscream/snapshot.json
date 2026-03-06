@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "8b5634bd-4d62-4125-bf90-001469635101",
+  "id": "b96ae9b4-eee1-4bfa-bfdf-b80a1ec09650",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -158,16 +158,6 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "role",
-      "entityType": "columns",
-      "table": "messages"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
       "name": "content",
       "entityType": "columns",
       "table": "messages"
@@ -279,6 +269,16 @@
       "default": null,
       "generated": null,
       "name": "name",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "acp_session_id",
       "entityType": "columns",
       "table": "sessions"
     },
@@ -440,20 +440,6 @@
       "where": null,
       "origin": "manual",
       "name": "idx_message_session_id",
-      "entityType": "indexes",
-      "table": "messages"
-    },
-    {
-      "columns": [
-        {
-          "value": "role",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "name": "idx_message_role",
       "entityType": "indexes",
       "table": "messages"
     },

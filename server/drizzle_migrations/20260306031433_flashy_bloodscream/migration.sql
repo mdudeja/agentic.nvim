@@ -15,7 +15,6 @@ CREATE TABLE `messages` (
 	`id` text PRIMARY KEY,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	`role` text NOT NULL,
 	`content` text NOT NULL,
 	`session_id` text NOT NULL,
 	CONSTRAINT `fk_messages_session_id_sessions_id_fk` FOREIGN KEY (`session_id`) REFERENCES `sessions`(`id`) ON DELETE CASCADE
@@ -36,6 +35,7 @@ CREATE TABLE `sessions` (
 	`updated_at` integer NOT NULL,
 	`status` text DEFAULT 'active' NOT NULL,
 	`name` text,
+	`acp_session_id` text NOT NULL,
 	`agent_id` text NOT NULL,
 	`summary_generated` integer DEFAULT false,
 	CONSTRAINT `fk_sessions_agent_id_agents_id_fk` FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON DELETE CASCADE
@@ -45,7 +45,6 @@ CREATE INDEX `idx_agent_provider_cwd` ON `agents` (`provider_name`,`cwd`);--> st
 CREATE INDEX `idx_agent_created_at` ON `agents` (`created_at`);--> statement-breakpoint
 CREATE INDEX `idx_agent_updated_at` ON `agents` (`updated_at`);--> statement-breakpoint
 CREATE INDEX `idx_message_session_id` ON `messages` (`session_id`);--> statement-breakpoint
-CREATE INDEX `idx_message_role` ON `messages` (`role`);--> statement-breakpoint
 CREATE INDEX `idx_message_created_at` ON `messages` (`created_at`);--> statement-breakpoint
 CREATE INDEX `idx_message_updated_at` ON `messages` (`updated_at`);--> statement-breakpoint
 CREATE INDEX `idx_session_summary_session_id` ON `session_summaries` (`session_id`);--> statement-breakpoint

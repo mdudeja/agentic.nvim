@@ -8,6 +8,7 @@ export const sessions = sqliteTable(
     ...baseSchema,
     ...sessionStatusSchema,
     name: text(),
+    acp_session_id: text().notNull(),
     agent_id: text()
       .references(() => agents.id, { onDelete: 'cascade' })
       .notNull(),

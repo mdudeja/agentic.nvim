@@ -1,7 +1,6 @@
 import { AgentManager } from 'src/managers/AgentManager'
 import { Providers } from 'src/data/providers'
 import { resolvePath } from 'src/utils/paths'
-import { AgentEventNames } from 'src/data/events'
 import { logDebug, logError, logInfo, logWarning } from 'src/utils/logger'
 import { generateCatchblock } from 'src/utils/helpers'
 import type {
@@ -14,29 +13,29 @@ import { Check, Errors } from 'typebox/value'
 import { ReadlineCommsInterface } from 'src/comms/ReadlineCommsInterface'
 import { WebsocketCommsInterface } from 'src/comms/WebsocketCommsInterface'
 import { ASMStateManager } from 'src/state'
+import { SessionManager } from 'src/managers/SessionManager'
 
 export class AgenticServer {
-  static instance: AgenticServer | null = null
-  private stateManager: ASMStateManager | null = null
-  private commsInterface: ICommsInterface | null = null
+  private stateManager: ASMStateManager
+  private commsInterface: ICommsInterface
   private agentManager: AgentManager | null = null
+  private sessionManager: SessionManager | null = null
 
-  static getInstance() {
-    if (!AgenticServer.instance) {
-      AgenticServer.instance = new AgenticServer()
-    }
-    return AgenticServer.instance
+  constructor(config: { mode: 'rpc' | 'server'; port?: number }) {
+    logInfo(`Starting Agentic Server in ${config.mode.toUpperCase()} mode...`)
+    this.stateManager = new ASMStateManager()
+    this.commsInterface =
+      config.mode === 'rpc'
+        ? new ReadlineCommsInterface()
+        : new WebsocketCommsInterface()
   }
 
   /**
    * RPC mode (default): listen for JSON-RPC payloads on stdin and respond on stdout.
    */
-  async init(config: { mode: 'rpc' | 'server'; port?: number }) {
-    logInfo(`Starting Agentic Server in ${config.mode.toUpperCase()} mode...`)
+  async init() {
     try {
-      this.stateManager = new ASMStateManager()
-      this._initCommsInterface(config)
-
+      this._initCommsInterface()
       logWarning('Server setup complete. Awaiting commands...')
     } catch (err) {
       generateCatchblock(
@@ -52,17 +51,16 @@ export class AgenticServer {
   }
 
   getState() {
-    return this.stateManager?.getState()
+    return this.stateManager.getState()
   }
 
   dispose() {
-    if (!AgenticServer.instance) {
-      logInfo('AgenticServer instance already disposed.')
-      return
-    }
-
     if (this.stateManager) {
       this.stateManager.dispose()
+    }
+
+    if (this.sessionManager) {
+      this.sessionManager.dispose()
     }
 
     if (this.agentManager) {
@@ -73,19 +71,10 @@ export class AgenticServer {
       this.commsInterface.dispose()
     }
 
-    AgenticServer.instance = null
     process.exit(0)
   }
 
-  private _initCommsInterface(config: {
-    mode: 'rpc' | 'server'
-    port?: number
-  }) {
-    this.commsInterface =
-      config.mode === 'rpc'
-        ? new ReadlineCommsInterface()
-        : new WebsocketCommsInterface()
-
+  private _initCommsInterface() {
     this.commsInterface.onMessage(async (message: string) => {
       try {
         const raw: unknown = JSON.parse(message)
@@ -114,7 +103,7 @@ export class AgenticServer {
     this.commsInterface.init()
   }
 
-  private _initAgentManager(params: ASMPayloadParams['client/init']) {
+  private async _initAgentManager(params: ASMPayloadParams['client/init']) {
     const resolvedCwd = resolvePath(params.cwd)
     const providerId = params.provider || 'copilot'
 
@@ -130,7 +119,15 @@ export class AgenticServer {
       )
     }
 
-    this.agentManager.on(AgentEventNames.loaded, (agent) => {
+    this.agentManager.on('agent.error', (errorMessage) => {
+      logError(`Agent error: ${errorMessage}`)
+      this.commsInterface?.respond({
+        id: null,
+        error: new Error(errorMessage),
+      })
+    })
+
+    this.agentManager.on('agent.loaded', (agent) => {
       if (!agent) {
         logError('Loaded event received without agent data')
         const err = new Error('Failed to load agent')
@@ -147,7 +144,7 @@ export class AgenticServer {
       this.agentManager?.spawn()
     })
 
-    this.agentManager.on(AgentEventNames.spawned, async (agent) => {
+    this.agentManager.on('agent.spawned', async (agent) => {
       if (!agent) {
         logError('Spawned event received without agent data')
         const err = new Error('Failed to spawn agent')
@@ -170,8 +167,14 @@ export class AgenticServer {
         return
       }
 
-      const { connection, client, initResponse } =
-        await this.agentManager.connect()
+      const connectData = await this.agentManager.connect()
+
+      if (!connectData) {
+        logError('Failed to establish connection in spawned event')
+        return
+      }
+
+      const { connection, client, initResponse } = connectData
 
       this.stateManager?.setItem('connection', {
         csc: connection,
@@ -180,7 +183,27 @@ export class AgenticServer {
       })
     })
 
-    this.agentManager.on(AgentEventNames.killed, (agent) => {
+    this.agentManager.on('agent.connected', async (agent) => {
+      if (!agent) {
+        logError('Connected event received without agent data')
+        return
+      }
+
+      logDebug(`Agent with ID ${agent.id} connected`)
+      this.commsInterface?.notify({
+        method: 'agentic/log',
+        data: {
+          level: 'info',
+          message: `Agent with ID ${agent.id} connected`,
+        },
+      })
+
+      this.stateManager?.setItem('agent', agent)
+
+      await this._initSessionManager()
+    })
+
+    this.agentManager.on('agent.killed', (agent) => {
       if (!agent) {
         logError('Killed event received without agent data')
         return
@@ -199,14 +222,28 @@ export class AgenticServer {
       this.stateManager?.deleteItem('connection')
     })
 
-    this.agentManager.init()
+    await this.agentManager.init()
+  }
+
+  private async _initSessionManager() {
+    this.sessionManager = new SessionManager(this)
+
+    this.sessionManager.on('session.error', (errorMessage) => {
+      logError(`Session error: ${errorMessage}`)
+      this.commsInterface?.respond({
+        id: null,
+        error: new Error(errorMessage),
+      })
+    })
+
+    await this.sessionManager.init()
   }
 
   private async _process_payload(payload: ASMPayload) {
     // Structural validation already done by Check(ASMPayloadSchema) before this call.
     switch (payload.data.method) {
       case 'client/init':
-        this._initAgentManager(payload.data.params)
+        await this._initAgentManager(payload.data.params)
         break
 
       case 'client/dispose':

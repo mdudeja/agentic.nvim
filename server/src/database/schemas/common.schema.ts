@@ -55,21 +55,11 @@ export const agentPermissionsSchema = {
 export enum SessionStatus {
   active = 'active',
   completed = 'completed',
-  suspended = 'suspended',
+  archived = 'archived',
   error = 'error',
 }
 export const sessionStatusSchema = {
   status: customEnum<SessionStatus>('status')
     .notNull()
     .default(SessionStatus.active),
-}
-
-export enum MessageRole {
-  user = 'user',
-  assistant = 'assistant',
-  system = 'system',
-}
-
-export const messageRoleSchema = {
-  role: customEnum<MessageRole>('role').notNull(),
 }

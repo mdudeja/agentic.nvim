@@ -6,12 +6,11 @@ import {
 } from '@agentclientprotocol/sdk'
 import { and, desc, eq } from 'drizzle-orm'
 import type { AgenticServer } from 'main'
-import EventEmitter from 'node:events'
 import { AcpClient } from 'src/acp/Client'
 import { FileSystemHandler } from 'src/acp/handlers/FileSystemHandler'
 import { PermissionHandler } from 'src/acp/handlers/PermissionHandler'
 import { TerminalHandler } from 'src/acp/handlers/TerminalHandler'
-import { AgentEventNames } from 'src/data/events'
+import type { AgentEvents } from 'src/data/events'
 import { Providers, PROVIDERS } from 'src/data/providers'
 import { AgenticDB } from 'src/database/AgenticDB'
 import { agents, type Agent } from 'src/database/schemas'
@@ -20,9 +19,10 @@ import type { ASMState } from 'src/state/IASMState'
 import { tapStream } from 'src/utils/helpers'
 import { logDebug, logError } from 'src/utils/logger'
 import { spawnShellCommand } from 'src/utils/shell'
+import { BaseManager } from './BaseManager'
 
-export class AgentManager extends EventEmitter {
-  private db: ReturnType<AgenticDB['getDB']> | null = null
+export class AgentManager extends BaseManager<AgentEvents> {
+  private db: ReturnType<AgenticDB['getDB']>
   private agent: ASMState['agent'] | null = null
 
   private fileSystemHandler: FileSystemHandler
@@ -45,10 +45,6 @@ export class AgentManager extends EventEmitter {
   }
 
   public async init() {
-    if (!this.db) {
-      throw new Error('Database is not initialized')
-    }
-
     const existingAgent = await this.db
       .select()
       .from(agents)
@@ -62,23 +58,25 @@ export class AgentManager extends EventEmitter {
     if (!existingAgent) {
       const agent = await this._createNew()
       if (!agent) {
-        throw new Error('Failed to create new agent')
+        this.emit('agent.error', 'Failed to create new agent')
+        return
       }
 
       this.agent = agent
 
-      this.emit(AgentEventNames.created, agent)
-      this.emit(AgentEventNames.loaded, agent)
+      this.emit('agent.created', agent)
+      this.emit('agent.loaded', agent)
       return
     }
 
     this.agent = existingAgent
-    this.emit(AgentEventNames.loaded, existingAgent)
+    this.emit('agent.loaded', existingAgent)
   }
 
   public spawn() {
     if (!this.agent) {
-      throw new Error('Agent is not initialized')
+      this.emit('agent.error', 'Agent is not initialized')
+      return
     }
 
     if (this.agent.process) {
@@ -92,7 +90,7 @@ export class AgentManager extends EventEmitter {
       env: this.agent.env || undefined,
     })
 
-    this.emit(AgentEventNames.spawned, this.agent)
+    this.emit('agent.spawned', this.agent)
 
     // const process = this.agent.process
 
@@ -149,11 +147,13 @@ export class AgentManager extends EventEmitter {
 
   public async connect() {
     if (!this.agent) {
-      throw new Error('Agent is not initialized')
+      this.emit('agent.error', 'Agent is not initialized')
+      return
     }
 
     if (!this.agent.process) {
-      throw new Error('Agent process is not running')
+      this.emit('agent.error', 'Agent process is not running')
+      return
     }
 
     logDebug(`Connecting to agent ${this.agent.id}`)
@@ -165,9 +165,11 @@ export class AgentManager extends EventEmitter {
       !stdin ||
       typeof stdin === 'number'
     ) {
-      throw new Error(
+      this.emit(
+        'agent.error',
         `Agent process for agent ${this.agent.id} does not have valid stdio streams`,
       )
+      return
     }
 
     // FileSink → WritableStream<Uint8Array> adapter
@@ -213,7 +215,15 @@ export class AgentManager extends EventEmitter {
       },
     })
 
-    logDebug(`Connection initialized with response:`, initResponse)
+    logDebug(`Connection initialized!`)
+    ;(async () => {
+      await connection.closed
+      logDebug(`Connection closed for agent ${this.agent?.id}`)
+      this.emit('agent.disconnected', this.agent ?? undefined)
+      this.dispose()
+    })()
+    this.emit('agent.connected', this.agent)
+
     return { connection, client, initResponse }
   }
 
@@ -231,7 +241,7 @@ export class AgentManager extends EventEmitter {
     try {
       this.agent.process.kill('SIGKILL')
       this.agent.process = undefined
-      this.emit(AgentEventNames.killed, this.agent)
+      this.emit('agent.killed', this.agent)
     } catch (error) {
       logError(`Failed to kill process for agent ${this.agent.id}:`, error)
     }
@@ -255,22 +265,12 @@ export class AgentManager extends EventEmitter {
     this.agent = null
   }
 
-  public override emit(event: AgentEventNames, payload?: ASMState['agent']) {
-    return super.emit(event, payload)
-  }
-
-  public override on(
-    event: AgentEventNames,
-    listener: (payload?: ASMState['agent']) => void,
-  ) {
-    return super.on(event, listener)
-  }
-
   private async _createNew() {
     const pConfig = PROVIDERS[this.provider]
 
     if (!pConfig) {
-      throw new Error(`Unsupported provider: ${this.provider}`)
+      this.emit('agent.error', `Unsupported provider: ${this.provider}`)
+      return
     }
 
     const newAgent: Agent['Insert'] = {

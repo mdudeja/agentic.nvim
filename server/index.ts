@@ -1,14 +1,5 @@
 import { AgenticServer } from 'main'
 
-const server = AgenticServer.getInstance()
-
-process.on('SIGINT', async () => {
-  const logWarning = (await import('./src/utils/logger')).logWarning
-  logWarning('Received SIGINT. Shutting down gracefully...')
-  server.dispose()
-  process.stdin.destroy()
-})
-
 declare module 'bun' {
   interface Env {
     NODE_ENV?: string
@@ -40,4 +31,13 @@ const port = portArg
   ? parseInt(portArg.split('=')[1] ?? '3777', 10)
   : parseInt(process.env['HTTP_PORT'] ?? '3777', 10)
 
-await server.init({ mode: isHttpMode ? 'server' : 'rpc', port })
+const server = new AgenticServer({ mode: isHttpMode ? 'server' : 'rpc', port })
+
+process.on('SIGINT', async () => {
+  const logWarning = (await import('./src/utils/logger')).logWarning
+  logWarning('Received SIGINT. Shutting down gracefully...')
+  server.dispose()
+  process.stdin.destroy()
+})
+
+await server.init()
