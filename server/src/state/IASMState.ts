@@ -1,6 +1,9 @@
 import type {
   ClientSideConnection,
   InitializeResponse,
+  SessionConfigOption,
+  SessionModelState,
+  SessionModeState,
 } from '@agentclientprotocol/sdk'
 import type { Subprocess } from 'bun'
 import type { AcpClient } from 'src/acp/Client'
@@ -10,7 +13,11 @@ export type ASMState = {
   agent?: Agent['Select'] & {
     process?: Subprocess
   }
-  session?: Session['Select']
+  session?: Session['Select'] & {
+    configOptions?: SessionConfigOption[]
+    models?: SessionModelState
+    modes?: SessionModeState
+  }
   connection?: {
     csc: ClientSideConnection
     client: AcpClient

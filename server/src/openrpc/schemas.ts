@@ -38,9 +38,33 @@ export const NeovimContextSchema = Type.Object({
     Type.Literal('workspace'),
     Type.Literal('keymaps'),
     Type.Literal('diagnostics'),
+    Type.Literal('image'),
+    Type.Literal('audio'),
+    Type.Literal('link'),
   ]),
-  content: Type.String(),
-  metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  text: Type.String(),
+  metadata: Type.Optional(
+    Type.Object({
+      mimetype: Type.Optional(Type.String()),
+      name: Type.Optional(Type.String()),
+      title: Type.Optional(Type.String()),
+      description: Type.Optional(Type.String()),
+      data: Type.Optional(Type.String()), // Base64-encoded string for binary data like images/audio
+      uri: Type.Optional(Type.String()), // For links or references to external resources
+      size: Type.Optional(Type.Number()), // Size in bytes
+    }),
+  ),
+  annotations: Type.Optional(
+    Type.Object({
+      audience: Type.Optional(
+        Type.Array(
+          Type.Union([Type.Literal('user'), Type.Literal('assitant')]),
+        ),
+      ),
+      priority: Type.Optional(Type.Number()), // Between 0 and 1, where 1 is highest priority
+      lastModified: Type.Optional(Type.String()), // ISO date string
+    }),
+  ),
 })
 
 // EnvVariable and TerminalExitStatus come from @agentclientprotocol/sdk
@@ -52,26 +76,26 @@ const TerminalExitStatusSchema = Type.Object({}, { additionalProperties: true })
 // ---------------------------------------------------------------------------
 
 export const InitParamsSchema = Type.Object({
+  requestId: Type.Optional(Type.String()),
   provider: ProviderSchema,
   cwd: Type.String(),
   sessionName: Type.Optional(Type.String()),
 })
 
 export const DisposeParamsSchema = Type.Object({
+  requestId: Type.Optional(Type.String()),
   reason: Type.Optional(Type.String()),
   agentId: Type.Optional(Type.String()),
 })
 
 export const AskParamsSchema = Type.Object({
+  requestId: Type.Optional(Type.String()),
   prompt: Type.String(),
   contexts: Type.Optional(Type.Array(NeovimContextSchema)),
 })
 
-export const GetHistoryParamsSchema = Type.Object({
-  sessionId: Type.String(),
-})
-
 export const AnswerParamsSchema = Type.Object({
+  requestId: Type.Optional(Type.String()),
   questionId: Type.String(),
   answer: Type.String(),
 })
@@ -144,10 +168,6 @@ const AskPayloadSchema = Type.Object({
   method: Type.Literal('client/ask'),
   params: AskParamsSchema,
 })
-const GetHistoryPayloadSchema = Type.Object({
-  method: Type.Literal('client/get_history'),
-  params: GetHistoryParamsSchema,
-})
 const AnswerPayloadSchema = Type.Object({
   method: Type.Literal('client/answer'),
   params: AnswerParamsSchema,
@@ -161,7 +181,6 @@ export const ASMPayloadDataSchema = Type.Union([
   InitPayloadSchema,
   DisposePayloadSchema,
   AskPayloadSchema,
-  GetHistoryPayloadSchema,
   AnswerPayloadSchema,
   TerminalPayloadSchema,
 ])
@@ -178,7 +197,14 @@ export const ASMPayloadSchema = Type.Object({
 
 // Respond notifications (server → client)
 export const RespondParamsSchema = Type.Object({
-  id: Type.Union([Type.String(), Type.Null()]),
+  method: Type.Union([
+    Type.Literal('client/init'),
+    Type.Literal('client/dispose'),
+    Type.Literal('client/ask'),
+    Type.Literal('client/answer'),
+    Type.Literal('client/terminal'),
+  ]),
+  id: Type.Optional(Type.String()),
   error: Type.Optional(Type.Any()),
   result: Type.Optional(Type.Any()),
 })
@@ -263,7 +289,6 @@ export type NeovimContext = Static<typeof NeovimContextSchema>
 export type InitParams = Static<typeof InitParamsSchema>
 export type DisposeParams = Static<typeof DisposeParamsSchema>
 export type AskParams = Static<typeof AskParamsSchema>
-export type GetHistoryParams = Static<typeof GetHistoryParamsSchema>
 export type AnswerParams = Static<typeof AnswerParamsSchema>
 export type TerminalResponse = Static<typeof TerminalResponseSchema>
 export type TerminalParams = Static<typeof TerminalParamsSchema>
@@ -280,7 +305,6 @@ export type ASMPayloadParams = {
   'client/init': InitParams
   'client/dispose': DisposeParams
   'client/ask': AskParams
-  'client/get_history': GetHistoryParams
   'client/answer': AnswerParams
   'client/terminal': TerminalParams
 }

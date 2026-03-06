@@ -1,52 +1,118 @@
-import { type Message, getMessages } from '../database/db'
+import type { Annotations, ContentBlock } from '@agentclientprotocol/sdk'
+import type { NeovimContext } from 'src/openrpc/schemas'
+import { uriToEmbeddedResource } from 'src/utils/helpers'
 
-// The shape of context payloads arriving from Neovim
-export interface NeovimContext {
-  type: 'selection' | 'file' | 'workspace' | 'keymaps' | 'diagnostics'
-  content: string
-  metadata?: Record<string, any>
-}
+/**
+ * Converts a user prompt and a single NeovimContext into an array of ACP
+ * ContentBlocks ready to be sent to the agent.
+ *
+ * **Block layout**
+ * 1. The prompt is always the first `"text"` block.
+ * 2. A single context block follows, chosen by `context.type`:
+ *
+ * | context.type | data present | uri present | result block |
+ * |---|---|---|---|
+ * | selection / file / workspace / keymaps / diagnostics | — | — | `"text"` with `[Label]` prefix |
+ * | image | ✓ | — | `"image"` (inline base64) |
+ * | image | ✗ | ✓ | `"resource"` (`EmbeddedResource` read from disk) |
+ * | audio | ✓ | — | `"audio"` (inline base64) |
+ * | audio | ✗ | ✓ | `"resource"` read from disk |
+ * | link | — | ✓ | `"resource_link"` |
+ * | any binary type | ✗ | ✓ | `"resource"` read from disk |
+ */
+export async function createContentBlocks(
+  prompt: string,
+  context: NeovimContext,
+): Promise<ContentBlock[]> {
+  const blocks: ContentBlock[] = []
 
-// Ingesters evaluate what context specifically needs to be attached to the PROMPT
-// based on what the user has requested + what is already known in the session history.
-export class ContextIngester {
-  constructor(private sessionId: string) {}
+  blocks.push({ type: 'text', text: prompt })
 
-  public async synthesizePrompt(
-    userPrompt: string,
-    contexts: NeovimContext[],
-  ): Promise<string> {
-    let finalPrompt = ''
-
-    // Check if this is a brand new session or an existing one
-    const history = getMessages(this.sessionId)
-    const isNewSession = history.length === 0
-
-    // If we have contexts, we need to append them dynamically
-    if (contexts && contexts.length > 0) {
-      finalPrompt += '### Provided Contexts\n\n'
-
-      for (const ctx of contexts) {
-        // Example Logic: Only inject heavy payloads if they aren't already in history
-        if (ctx.type === 'keymaps' && !isNewSession) {
-          const hasKeymapsPreviously = history.some((m) =>
-            m.content.includes('### Keymap Snapshot'),
-          )
-          if (hasKeymapsPreviously) {
-            // Skip injecting keymaps again, the model already has it in its memory window
-            continue
-          }
-        }
-
-        // Format the context block
-        finalPrompt += `--- Context Block: ${ctx.type.toUpperCase()} ---\n`
-        finalPrompt += `${ctx.content}\n\n`
+  const annotations: Annotations | undefined = context.annotations
+    ? {
+        audience: context.annotations.audience as
+          | ('user' | 'assistant')[]
+          | undefined,
+        priority: context.annotations.priority ?? undefined,
       }
+    : undefined
+
+  switch (context.type) {
+    case 'selection':
+    case 'file':
+    case 'workspace':
+    case 'keymaps':
+    case 'diagnostics': {
+      const label = context.type.charAt(0).toUpperCase() + context.type.slice(1)
+      blocks.push({
+        type: 'text',
+        text: `[${label}]\n${context.text}`,
+        ...(annotations ? { annotations } : {}),
+      })
+      break
     }
 
-    // Add the main user prompt
-    finalPrompt += `### User Query\n\n${userPrompt}`
+    case 'image': {
+      const { data, mimetype, uri } = context.metadata ?? {}
+      if (data) {
+        blocks.push({
+          type: 'image',
+          data,
+          mimeType: mimetype ?? 'image/png',
+          uri: uri ?? undefined,
+          ...(annotations ? { annotations } : {}),
+        })
+      } else if (uri) {
+        blocks.push(await uriToEmbeddedResource(uri, mimetype, annotations))
+      } else {
+        // No data and no URI — degrade to plain text.
+        blocks.push({ type: 'text', text: context.text })
+      }
+      break
+    }
 
-    return finalPrompt
+    case 'audio': {
+      const { data, mimetype, uri } = context.metadata ?? {}
+      if (data) {
+        blocks.push({
+          type: 'audio',
+          data,
+          mimeType: mimetype ?? 'audio/wav',
+          ...(annotations ? { annotations } : {}),
+        })
+      } else if (uri) {
+        blocks.push(await uriToEmbeddedResource(uri, mimetype, annotations))
+      } else {
+        blocks.push({ type: 'text', text: context.text })
+      }
+      break
+    }
+
+    case 'link': {
+      const { uri, name, title, description, mimetype, size } =
+        context.metadata ?? {}
+      if (!uri) {
+        blocks.push({ type: 'text', text: context.text })
+        break
+      }
+
+      if (uri.startsWith('file://') || uri.startsWith('/')) {
+        blocks.push(await uriToEmbeddedResource(uri, mimetype, annotations))
+      } else {
+        blocks.push({
+          type: 'resource_link',
+          uri,
+          name: name ?? uri,
+          title: title ?? undefined,
+          description: description ?? undefined,
+          mimeType: mimetype ?? undefined,
+          size: size ?? undefined,
+          ...(annotations ? { annotations } : {}),
+        })
+      }
+      break
+    }
   }
+
+  return blocks
 }

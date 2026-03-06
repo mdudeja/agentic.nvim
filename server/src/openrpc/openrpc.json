@@ -13,6 +13,14 @@
       "paramStructure": "by-name",
       "params": [
         {
+          "name": "requestId",
+          "required": false,
+          "summary": "Optional correlation ID for the request",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
           "name": "provider",
           "required": true,
           "summary": "AI provider to use",
@@ -47,6 +55,41 @@
           "summary": "Optional human-readable name for the session",
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "summarizer",
+          "required": false,
+          "summary": "Optional configuration for automatic session summarization (experimental)",
+          "schema": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "copilot"
+                  },
+                  {
+                    "type": "string",
+                    "const": "opencode"
+                  },
+                  {
+                    "type": "string",
+                    "const": "gemini"
+                  }
+                ]
+              },
+              "prompt": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              }
+            }
           }
         }
       ],
@@ -113,6 +156,33 @@
               "agentId": "cm9xyz789ghi012"
             }
           }
+        },
+        {
+          "name": "init with summarizer config",
+          "params": [
+            {
+              "name": "provider",
+              "value": "opencode"
+            },
+            {
+              "name": "cwd",
+              "value": "/home/user/my-project"
+            },
+            {
+              "name": "summarizer",
+              "value": {
+                "name": "opencode",
+                "model": "opencode/claude-3-5-haiku"
+              }
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": {
+              "success": true,
+              "agentId": "cm9xyz789ghi012"
+            }
+          }
         }
       ]
     },
@@ -123,9 +193,25 @@
       "paramStructure": "by-name",
       "params": [
         {
+          "name": "requestId",
+          "required": false,
+          "summary": "Optional correlation ID for the request",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
           "name": "reason",
           "required": false,
           "summary": "Optional reason for disposal",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agentId",
+          "required": false,
+          "summary": "Optional ID of the specific agent to dispose",
           "schema": {
             "type": "string"
           }
@@ -180,6 +266,14 @@
       "paramStructure": "by-name",
       "params": [
         {
+          "name": "requestId",
+          "required": false,
+          "summary": "Optional correlation ID for the request",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
           "name": "prompt",
           "required": true,
           "summary": "The user's question or instruction",
@@ -197,7 +291,7 @@
               "type": "object",
               "required": [
                 "type",
-                "content"
+                "text"
               ],
               "properties": {
                 "type": {
@@ -221,16 +315,74 @@
                     {
                       "type": "string",
                       "const": "diagnostics"
+                    },
+                    {
+                      "type": "string",
+                      "const": "image"
+                    },
+                    {
+                      "type": "string",
+                      "const": "audio"
+                    },
+                    {
+                      "type": "string",
+                      "const": "link"
                     }
                   ]
                 },
-                "content": {
+                "text": {
                   "type": "string"
                 },
                 "metadata": {
                   "type": "object",
-                  "patternProperties": {
-                    "^.*$": {}
+                  "properties": {
+                    "mimetype": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "string"
+                    },
+                    "uri": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "annotations": {
+                  "type": "object",
+                  "properties": {
+                    "audience": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "user"
+                          },
+                          {
+                            "type": "string",
+                            "const": "assitant"
+                          }
+                        ]
+                      }
+                    },
+                    "priority": {
+                      "type": "number"
+                    },
+                    "lastModified": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -305,6 +457,14 @@
       "paramStructure": "by-name",
       "params": [
         {
+          "name": "requestId",
+          "required": false,
+          "summary": "Optional correlation ID for the request",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
           "name": "sessionId",
           "required": true,
           "schema": {
@@ -378,6 +538,14 @@
       "description": "The server pauses and sends an `agentic/question` notification when the agent needs user input. Supply the answer here, referencing the same `questionId`.",
       "paramStructure": "by-name",
       "params": [
+        {
+          "name": "requestId",
+          "required": false,
+          "summary": "Optional correlation ID for the request",
+          "schema": {
+            "type": "string"
+          }
+        },
         {
           "name": "questionId",
           "required": true,
@@ -644,6 +812,123 @@
                   "stderr": "",
                   "truncated": false
                 }
+              }
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "agentic/respond",
+      "summary": "[Server → Client] Result or error for a prior client/* call",
+      "description": "Sent by the server after processing any `client/*` method. `method` echoes the original client method, `id` correlates to the `requestId` supplied in the params (if any). Exactly one of `result` or `error` will be present.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "method",
+          "required": true,
+          "summary": "The client method this response belongs to",
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "client/init"
+              },
+              {
+                "type": "string",
+                "const": "client/dispose"
+              },
+              {
+                "type": "string",
+                "const": "client/ask"
+              },
+              {
+                "type": "string",
+                "const": "client/get_history"
+              },
+              {
+                "type": "string",
+                "const": "client/answer"
+              },
+              {
+                "type": "string",
+                "const": "client/terminal"
+              }
+            ]
+          }
+        },
+        {
+          "name": "id",
+          "required": false,
+          "summary": "Correlates to the requestId sent in the client params",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "error",
+          "required": false,
+          "summary": "Set when the server encountered an error",
+          "schema": {}
+        },
+        {
+          "name": "result",
+          "required": false,
+          "summary": "Set on success — shape depends on the method",
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "NotificationResult",
+        "schema": {
+          "type": "null",
+          "description": "Notification — no response expected"
+        }
+      },
+      "examples": [
+        {
+          "name": "successful init response",
+          "params": [
+            {
+              "name": "method",
+              "value": "client/init"
+            },
+            {
+              "name": "id",
+              "value": "req_001"
+            },
+            {
+              "name": "result",
+              "value": {
+                "success": true,
+                "agentId": "cm9abc123def456"
+              }
+            }
+          ],
+          "result": {
+            "name": "result",
+            "value": null
+          }
+        },
+        {
+          "name": "error response",
+          "params": [
+            {
+              "name": "method",
+              "value": "client/ask"
+            },
+            {
+              "name": "id",
+              "value": "req_002"
+            },
+            {
+              "name": "error",
+              "value": {
+                "message": "Agent not initialised"
               }
             }
           ],

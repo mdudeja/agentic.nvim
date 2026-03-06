@@ -12,7 +12,7 @@ export const sessions = sqliteTable(
     agent_id: text()
       .references(() => agents.id, { onDelete: 'cascade' })
       .notNull(),
-    summary_generated: integer({ mode: 'boolean' }).default(false),
+    is_archived: integer({ mode: 'boolean' }).default(false),
   },
   (table) => [
     index('idx_session_agent_id').on(table.agent_id),

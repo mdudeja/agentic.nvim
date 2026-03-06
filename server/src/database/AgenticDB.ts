@@ -82,33 +82,22 @@ export class AgenticDB {
   }
 
   private _make_relations() {
-    const { agents, sessions, messages, session_summaries } = schema
+    const { agents, sessions } = schema
 
-    const relations = defineRelations(
-      { agents, sessions, messages, session_summaries },
-      (r) => ({
-        agents: {
-          sessions: r.many.sessions({
-            from: r.agents.id,
-            to: r.sessions.agent_id,
-          }),
-        },
-        sessions: {
-          agent: r.one.agents({
-            from: r.sessions.agent_id,
-            to: r.agents.id,
-          }),
-          messages: r.many.messages({
-            from: r.sessions.id,
-            to: r.messages.session_id,
-          }),
-          session_summary: r.one.session_summaries({
-            from: r.sessions.id,
-            to: r.session_summaries.session_id,
-          }),
-        },
-      }),
-    )
+    const relations = defineRelations({ agents, sessions }, (r) => ({
+      agents: {
+        sessions: r.many.sessions({
+          from: r.agents.id,
+          to: r.sessions.agent_id,
+        }),
+      },
+      sessions: {
+        agent: r.one.agents({
+          from: r.sessions.agent_id,
+          to: r.agents.id,
+        }),
+      },
+    }))
 
     return relations
   }

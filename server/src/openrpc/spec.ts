@@ -14,10 +14,10 @@ import type { OpenRpcParam, OpenRpcSpec } from './types'
 import {
   AskParamsSchema,
   AnswerParamsSchema,
-  GetHistoryParamsSchema,
   InitParamsSchema,
   LogLevelSchema,
   NeovimContextSchema,
+  RespondParamsSchema,
   TerminalParamsSchema,
   TerminalRequestToNvimSchema,
   TerminalResponseSchema,
@@ -90,6 +90,7 @@ export const spec: OpenRpcSpec = {
         'Responds with success and the spawned agent ID.',
       paramStructure: 'by-name',
       params: propsOf(InitParamsSchema, {
+        requestId: { summary: 'Optional correlation ID for the request' },
         provider: { summary: 'AI provider to use' },
         cwd: { summary: 'Absolute path to the workspace root' },
         sessionName: {
@@ -146,7 +147,9 @@ export const spec: OpenRpcSpec = {
         'Responds with success.',
       paramStructure: 'by-name',
       params: propsOf(DisposeParamsSchema, {
+        requestId: { summary: 'Optional correlation ID for the request' },
         reason: { summary: 'Optional reason for disposal' },
+        agentId: { summary: 'Optional ID of the specific agent to dispose' },
       }),
       result: {
         name: 'DisposeResult',
@@ -180,6 +183,7 @@ export const spec: OpenRpcSpec = {
         'agent. Requires a prior successful `client/init`.',
       paramStructure: 'by-name',
       params: propsOf(AskParamsSchema, {
+        requestId: { summary: 'Optional correlation ID for the request' },
         prompt: { summary: "The user's question or instruction" },
         contexts: {
           summary: 'Optional Neovim context objects to attach to the prompt',
@@ -227,48 +231,6 @@ export const spec: OpenRpcSpec = {
     },
 
     {
-      name: 'client/get_history',
-      summary: 'Retrieve message history for a session',
-      paramStructure: 'by-name',
-      params: propsOf(GetHistoryParamsSchema),
-      result: {
-        name: 'HistoryResult',
-        schema: {
-          type: 'object',
-          required: ['history'],
-          properties: {
-            history: {
-              type: 'array',
-              items: {
-                type: 'object',
-                required: ['role', 'content'],
-                properties: {
-                  role: { type: 'string', enum: ['user', 'assistant'] },
-                  content: { type: 'string' },
-                },
-              },
-            },
-          },
-        },
-      },
-      examples: [
-        {
-          name: 'get history',
-          params: [{ name: 'sessionId', value: 'sess_abc123' }],
-          result: {
-            name: 'result',
-            value: {
-              history: [
-                { role: 'user', content: 'Explain this code' },
-                { role: 'assistant', content: 'This function does X...' },
-              ],
-            },
-          },
-        },
-      ],
-    },
-
-    {
       name: 'client/answer',
       summary: 'Reply to a question sent by the server via `agentic/question`',
       description:
@@ -276,6 +238,7 @@ export const spec: OpenRpcSpec = {
         'needs user input. Supply the answer here, referencing the same `questionId`.',
       paramStructure: 'by-name',
       params: propsOf(AnswerParamsSchema, {
+        requestId: { summary: 'Optional correlation ID for the request' },
         questionId: {
           summary:
             'ID of the question (from the `agentic/question` notification)',
@@ -357,6 +320,52 @@ export const spec: OpenRpcSpec = {
     // -------------------------------------------------------------------------
     // SERVER → CLIENT (notifications)
     // -------------------------------------------------------------------------
+    {
+      name: 'agentic/respond',
+      summary: '[Server → Client] Result or error for a prior client/* call',
+      description:
+        'Sent by the server after processing any `client/*` method. ' +
+        '`method` echoes the original client method, `id` correlates to the ' +
+        '`requestId` supplied in the params (if any). ' +
+        'Exactly one of `result` or `error` will be present.',
+      paramStructure: 'by-name',
+      params: propsOf(RespondParamsSchema, {
+        method: { summary: 'The client method this response belongs to' },
+        id: {
+          summary: 'Correlates to the requestId sent in the client params',
+        },
+        error: { summary: 'Set when the server encountered an error' },
+        result: { summary: 'Set on success — shape depends on the method' },
+      }),
+      result: nullResult('Notification — no response expected'),
+      examples: [
+        {
+          name: 'successful init response',
+          params: [
+            { name: 'method', value: 'client/init' },
+            { name: 'id', value: 'req_001' },
+            {
+              name: 'result',
+              value: { success: true, agentId: 'cm9abc123def456' },
+            },
+          ],
+          result: { name: 'result', value: null },
+        },
+        {
+          name: 'error response',
+          params: [
+            { name: 'method', value: 'client/ask' },
+            { name: 'id', value: 'req_002' },
+            {
+              name: 'error',
+              value: { message: 'Agent not initialised' },
+            },
+          ],
+          result: { name: 'result', value: null },
+        },
+      ],
+    },
+
     {
       name: 'agentic/log',
       summary: '[Server → Client] Log message notification',
@@ -479,4 +488,5 @@ export const spec: OpenRpcSpec = {
 // Suppress unused-import warnings — these are referenced only as JSON Schema
 // values in the spec above (TypeScript doesn't see the .properties access as a usage).
 void NeovimContextSchema
+void RespondParamsSchema
 void TerminalResponseSchema

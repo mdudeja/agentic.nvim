@@ -121,9 +121,12 @@ export class AgenticServer {
 
     this.agentManager.on('agent.error', (errorMessage) => {
       logError(`Agent error: ${errorMessage}`)
-      this.commsInterface?.respond({
-        id: null,
-        error: new Error(errorMessage),
+      this.commsInterface?.notify({
+        method: 'agentic/log',
+        data: {
+          level: 'error',
+          message: `Agent error: ${errorMessage}`,
+        },
       })
     })
 
@@ -131,9 +134,12 @@ export class AgenticServer {
       if (!agent) {
         logError('Loaded event received without agent data')
         const err = new Error('Failed to load agent')
-        this.commsInterface?.respond({
-          id: null,
-          error: err,
+        this.commsInterface?.notify({
+          method: 'agentic/log',
+          data: {
+            level: 'error',
+            message: `Failed to load agent: ${err.message}`,
+          },
         })
         return
       }
@@ -148,9 +154,12 @@ export class AgenticServer {
       if (!agent) {
         logError('Spawned event received without agent data')
         const err = new Error('Failed to spawn agent')
-        this.commsInterface?.respond({
-          id: null,
-          error: err,
+        this.commsInterface?.notify({
+          method: 'agentic/log',
+          data: {
+            level: 'error',
+            message: `Failed to spawn agent: ${err.message}`,
+          },
         })
         return
       }
@@ -158,7 +167,8 @@ export class AgenticServer {
       logDebug(`Agent spawned with ID ${agent.id}`)
       this.stateManager?.setItem('agent', agent)
       this.commsInterface?.respond({
-        id: null,
+        method: 'client/init',
+        id: params.requestId,
         result: { success: true, agentId: agent.id },
       })
 
@@ -230,9 +240,38 @@ export class AgenticServer {
 
     this.sessionManager.on('session.error', (errorMessage) => {
       logError(`Session error: ${errorMessage}`)
-      this.commsInterface?.respond({
-        id: null,
-        error: new Error(errorMessage),
+      this.commsInterface?.notify({
+        method: 'agentic/log',
+        data: {
+          level: 'error',
+          message: `Session error: ${errorMessage}`,
+        },
+      })
+    })
+
+    this.sessionManager.on('session.loaded', (session) => {
+      if (!session) {
+        logError('Loaded event received without session data')
+        const err = new Error('Failed to load session')
+        this.commsInterface?.notify({
+          method: 'agentic/log',
+          data: {
+            level: 'error',
+            message: `Failed to load session: ${err.message}`,
+          },
+        })
+        return
+      }
+
+      logDebug(`Session loaded with ID ${session.id}`)
+      this.stateManager?.setItem('session', session)
+
+      this.commsInterface?.notify({
+        method: 'agentic/log',
+        data: {
+          level: 'info',
+          message: `Session loaded with ID ${session.id} and name ${session.name}`,
+        },
       })
     })
 
@@ -255,10 +294,6 @@ export class AgenticServer {
         //   id: payload.id,
         //   data: payload.params.ask,
         // })
-        break
-
-      case 'client/get_history':
-        await this._getHistory(payload.data.params)
         break
 
       case 'client/terminal':
@@ -332,15 +367,4 @@ export class AgenticServer {
   //     respond(payload.id, null, e)
   //   }
   // }
-
-  private async _getHistory(params: ASMPayloadParams['client/get_history']) {
-    if (!params || !params.sessionId) {
-      throw new Error('sessionId is required for get_history')
-    }
-    // const history = getMessages(params.sessionId)
-    // this.commsInterface?.respond({
-    //   id: null,
-    //   result: { history },
-    // })
-  }
 }
