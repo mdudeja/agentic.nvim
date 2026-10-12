@@ -210,7 +210,8 @@ end
 ---@param signal integer
 function M:_on_exit(code, signal)
   local log = require("agentic.ui.log")
-  log.warn(string.format("Server exited (code=%d signal=%d)", code, signal))
+  -- `code`/`signal` are strings ("exit"/"term") for some jobstop paths.
+  log.warn(string.format("Server exited (code=%s signal=%s)", tostring(code), tostring(signal)))
 
   for id, pending in pairs(self.pending) do
     pending.cb(nil, Error.new("server exited"))

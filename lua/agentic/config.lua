@@ -9,7 +9,7 @@
 ---@field height number?
 
 ---@alias Agentic.config.provider "copilot" | "opencode" | "gemini" | "codex" | "claude" | "echo"
----@alias Agentic.config.win.position "floating" | "top" | "bottom" | "left" | "right"
+---@alias Agentic.config.win.position "floating" | "top" | "bottom" | "left" | "right" | "topright" | "below"
 
 ---@class Agentic.config.win: vim.api.keyset.win_config
 ---@field ft string?
@@ -20,6 +20,11 @@
 ---@field size Agentic.config.win.size?
 ---@field position Agentic.config.win.position?
 ---@field relative "editor" | "win" | "cursor"?
+---@field split "left" | "right" | "top" | "bottom" | "below"?
+---@field anchor string? -- view name to align a floating window to (same column/width)
+---@field border string? -- float border style (e.g. "rounded", "single"); floats only
+---@field title string? -- float / split title
+---@field padding integer? -- left/right breathing room inside the window
 
 ---@class Agentic.config
 ---@field debug boolean?
@@ -66,27 +71,38 @@ local defaults = {
     main = {
       ft = "agentic",
       fixbuf = true,
+      -- Floating windows with a real border: the border gives clear visual
+      -- separation and works even when another plugin claims the winbar.
       relative = "editor",
-      position = "right",
+      position = "topright",
+      border = "rounded",
+      title = " Agentic ",
       enter = true,
       resize = true,
       stack = true,
+      padding = 1,
       size = {
         width = 0.3,
-        height = 1,
+        -- Leave room beneath for the composer.
+        height = 0.72,
       },
     },
     chat = {
       ft = "agentic_input",
       fixbuf = true,
       relative = "editor",
-      position = "bottom",
+      -- Anchored to main: same column and width, docked directly beneath it.
+      anchor = "main",
+      position = "below",
+      border = "rounded",
+      title = " Prompt ",
       enter = true,
       resize = true,
       stack = true,
+      padding = 1,
       size = {
         width = 0.3,
-        height = 0.25,
+        height = 0.22,
       },
     },
   },

@@ -60,13 +60,16 @@ function M.new(opts)
     state.update("main_window", winnr)
 
     if winnr and vim.api.nvim_win_is_valid(winnr) then
-      vim.wo[winnr].statusline = require("agentic.ui.statusline").statusline()
+      require("agentic.ui.statusline").refresh("main")
       vim.wo[winnr].wrap = true
+      vim.wo[winnr].number = false
+      vim.wo[winnr].relativenumber = false
+      vim.wo[winnr].cursorline = false
     end
   end
 
-  require("agentic.keymaps").attach(bufnr)
   require("agentic.ui.render").setup_highlights()
+  require("agentic.ui.statusline").setup_highlights()
 
   self:_bind_handlers()
   self:_ensure_server()
@@ -127,7 +130,7 @@ function M:_mirror_config_options()
     end
   end
   if state.main_window and vim.api.nvim_win_is_valid(state.main_window) then
-    vim.wo[state.main_window].statusline = require("agentic.ui.statusline").statusline()
+    require("agentic.ui.statusline").refresh("main")
   end
 end
 

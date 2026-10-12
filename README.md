@@ -144,19 +144,21 @@ lua/agentic/
     terminal.lua      agentic/terminal handling
     diff.lua          tool-call diff review
     log.lua           server log buffer
-    statusline.lua    provider/model/mode/session statusline
-    win.lua           window base (split + floating views)
+    statusline.lua    winbar (provider/model/mode/session) + highlights
+    win.lua           window base (split + floating views, padding, borders)
 ```
 
-## Statusline
+## Statusline / winbar
 
-The agentic windows use a custom statusline:
-`<icon> PROVIDER model (mode) │ ● READY │ session │ id`. If you use Lualine, you
-may want to disable it for the `agentic` filetype:
+The agentic windows render their state in the window **winbar** (so it stays
+visible even with `laststatus=3`): a title, `<icon> PROVIDER model (mode)`, a
+status dot (`● READY` / `◐ RUNNING` / `○ DOWN`), and the session name/id on the
+right. A per-window statusline is also set when `laststatus ~= 3`. If you use
+Lualine, disable it for the agentic filetypes:
 
 ```lua
 require("lualine").setup {
-  options = { disabled_filetypes = { statusline = { "agentic", "agentic_input" } } },
+  options = { disabled_filetypes = { winbar = { "agentic", "agentic_input" } } },
 }
 ```
 
@@ -196,9 +198,31 @@ require("agentic").setup({
     root = nil,
   },
   views = {
-    main = { relative = "editor", position = "right", size = { width = 0.3, height = 1 } },
-    chat = { relative = "editor", position = "bottom", size = { width = 0.3, height = 0.25 } },
+    -- Floating windows with a real border give clear separation from the editor
+    -- and from each other. `chat` is anchored to `main` so it shares its column
+    -- and width and docks directly beneath it.
+    main = {
+      relative = "editor",
+      position = "topright",
+      border = "rounded",
+      title = " Agentic ",
+      padding = 1,
+      size = { width = 0.3, height = 0.72 },
+    },
+    chat = {
+      relative = "editor",
+      anchor = "main",
+      position = "below",
+      border = "rounded",
+      title = " Prompt ",
+      padding = 1,
+      size = { width = 0.3, height = 0.22 },
+    },
   },
   keys = {}, -- extra global keymaps
 })
 ```
+
+For docked **splits** instead of floats, drop `relative`/`border`/`position` and
+set `split = "right"` on `main` and `split = "below"` (with `anchor = "main"`)
+on `chat`. `position` accepts `topright`, `right`, `below`, `floating`, etc.

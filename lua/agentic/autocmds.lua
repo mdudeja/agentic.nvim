@@ -7,6 +7,18 @@ local util = require("agentic.util")
 function M.setup()
   local group = vim.api.nvim_create_augroup("Agentic", { clear = true })
 
+  -- Remember the last live visual/select selection. A selection only exists
+  -- while the mode is active, and the user may be back in the composer by the
+  -- time they press `@v`, so sample it as it is made (capture is a no-op outside
+  -- visual/select mode).
+  vim.api.nvim_create_autocmd({ "ModeChanged", "CursorMoved", "CursorMovedI" }, {
+    group = group,
+    pattern = "*",
+    callback = function()
+      require("agentic.selection").capture()
+    end,
+  })
+
   -- Keep floating windows sized to the editor.
   vim.api.nvim_create_autocmd("VimResized", {
     group = group,

@@ -15,6 +15,9 @@ local non_win_opts = {
   "position",
   "split",
   "relative",
+  "anchor",
+  "padding",
+  "title",
 }
 
 local view_win_buf_map = {
@@ -72,7 +75,61 @@ local function calculate_position(position, width, height)
     return { row = math.floor((lines - height) / 2), col = cols - width }
   end
 
+  if position == "topright" then
+    return { row = 0, col = cols - width }
+  end
+
   return { row = math.floor((lines - height) / 2), col = math.floor((cols - width) / 2) }
+end
+
+--- Resolves the window that a floating view is anchored to (if any).
+---@param name string?
+---@return integer?
+local function anchor_win_for(name)
+  local map = name and view_win_buf_map[name]
+  if not map then
+    return nil
+  end
+  local win = util.getState()[map.win] --[[@as integer?]]
+  if win and vim.api.nvim_win_is_valid(win) then
+    return win
+  end
+  return nil
+end
+
+--- Computes the editor-relative geometry for a floating view.
+---
+--- When `opts.anchor` names another view (e.g. `"main"`), the window is placed
+--- in that window's column, matched to its width, and aligned to its bottom
+--- (`position = "bottom"`, the default) or top. This keeps the composer under
+--- the transcript instead of floating over the editor's other buffers.
+---@param opts Agentic.config.win
+---@return { row: integer, col: integer, width: integer, height: integer }
+local function resolve_float_geometry(opts)
+  local size = opts.size or {}
+  local position = opts.position or "floating"
+  local width = calculate_width(size.width or 0.5)
+  local height = calculate_height(size.height or 0.5)
+
+  local anchor = anchor_win_for(opts.anchor)
+  if anchor then
+    local apos = vim.api.nvim_win_get_position(anchor)
+    local awidth = vim.api.nvim_win_get_width(anchor)
+    local aheight = vim.api.nvim_win_get_height(anchor)
+    local row
+    if position == "top" then
+      row = apos[1]
+    elseif position == "below" then
+      -- Dock directly beneath the anchor (not bottom-aligned, which overlaps).
+      row = apos[1] + aheight + 1
+    else
+      row = apos[1] + aheight - height
+    end
+    return { row = row, col = apos[2], width = awidth, height = height }
+  end
+
+  local pos = calculate_position(position, width, height)
+  return { row = pos.row, col = pos.col, width = width, height = height }
 end
 
 ---@param opts Agentic.config.win
@@ -115,43 +172,97 @@ function M:create_win(bufnr, enter, opts)
   end
 
   opts = opts or {}
-  local size = self.opts and self.opts.size or {}
-  local width = calculate_width(size.width or 0.5)
-  local height = calculate_height(size.height or 0.5)
 
   if self.opts.relative then
-    local position = self.opts.position or "floating"
-    local pos = calculate_position(position, width, height)
+    local geo = resolve_float_geometry(self.opts)
     local win_opts = vim.tbl_extend("force", opts, {
       relative = self.opts.relative,
       style = self.opts.style or "minimal",
-      width = width,
-      height = height,
-      row = pos.row,
-      col = pos.col,
+      width = geo.width,
+      height = geo.height,
+      row = geo.row,
+      col = geo.col,
     })
-    return vim.api.nvim_open_win(bufnr, enter or false, win_opts)
+    if self.opts.border ~= nil then
+      win_opts.border = self.opts.border
+    end
+    if self.opts.title then
+      win_opts.title = self.opts.title
+      win_opts.title_pos = "center"
+    end
+    local win = vim.api.nvim_open_win(bufnr, enter or false, win_opts)
+    self:_apply_padding(win)
+    return win
   end
 
-  -- Split-based window.
+  -- Split-based window. `split` selects the edge: left/right are vertical
+  -- splits, top/below are horizontal ones. When `anchor` names another view,
+  -- the split is made *from that window*, so the new one shares its column (or
+  -- row) — e.g. the composer docks under the transcript at the same width.
   local split = self.opts.split or "right"
+  local size = self.opts.size or {}
   local vertical = split == "left" or split == "right"
   local before = split == "left" or split == "top"
-  local cmd = string.format("%s %s split", before and "topleft" or "botright", vertical and "vertical" or "")
-  vim.cmd(cmd)
-  local win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(win, bufnr)
 
-  if vertical then
-    vim.api.nvim_win_set_width(win, width)
+  local anchor = anchor_win_for(self.opts.anchor)
+  -- `botright`/`topleft` snap to the tab edge; when anchored we instead split
+  -- relative to the anchor window with `belowright`/`aboveleft`.
+  local edge
+  if anchor then
+    edge = before and "aboveleft" or "belowright"
   else
-    vim.api.nvim_win_set_height(win, height)
+    edge = before and "topleft" or "botright"
+  end
+  local cmd = string.format("%s %s split", edge, vertical and "vertical" or "")
+
+  local function do_split()
+    vim.cmd(cmd)
+    local win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(win, bufnr)
+
+    if vertical then
+      vim.api.nvim_win_set_width(win, calculate_width(size.width or 0.5))
+    else
+      vim.api.nvim_win_set_height(win, calculate_height(size.height or 0.5))
+    end
+
+    if not enter then
+      vim.cmd("wincmd p")
+    end
+    self:_apply_padding(win)
+    return win
   end
 
-  if not enter then
-    vim.cmd("wincmd p")
+  if anchor then
+    return vim.api.nvim_win_call(anchor, do_split)
   end
-  return win
+  return do_split()
+end
+
+--- Adds left/right breathing room inside a window. Floats do not support
+--- `padding`, so this is applied to both window kinds.
+---@param win integer
+function M:_apply_padding(win)
+  local pad = math.max(self.opts and self.opts.padding or 0, 0)
+  if not vim.api.nvim_win_is_valid(win) then
+    return
+  end
+  if pad > 0 then
+    -- `foldcolumn` reserves blank columns on the left; `signcolumn` one on the
+    -- right (a hidden sign column still occupies width).
+    pcall(vim.api.nvim_set_option_value, "foldcolumn", tostring(pad), { win = win })
+    pcall(vim.api.nvim_set_option_value, "signcolumn", "yes", { win = win })
+    local winhl = vim.api.nvim_get_option_value("winhighlight", { win = win })
+    local mapping = "FoldColumn:AgenticPadding,SignColumn:AgenticPadding"
+    pcall(
+      vim.api.nvim_set_option_value,
+      "winhighlight",
+      winhl ~= "" and (winhl .. "," .. mapping) or mapping,
+      { win = win }
+    )
+  else
+    pcall(vim.api.nvim_set_option_value, "foldcolumn", "0", { win = win })
+  end
 end
 
 ---@param view_name string?
@@ -180,7 +291,8 @@ function M:resize(view_name)
   local height = calculate_height(size.height or 0.5)
 
   if self.opts.relative then
-    pcall(vim.api.nvim_win_set_config, winnr, { width = width, height = height })
+    local geo = resolve_float_geometry(self.opts)
+    pcall(vim.api.nvim_win_set_config, winnr, { width = geo.width, height = geo.height, row = geo.row, col = geo.col })
   elseif self.opts.split == "left" or self.opts.split == "right" then
     pcall(vim.api.nvim_win_set_width, winnr, width)
   else
