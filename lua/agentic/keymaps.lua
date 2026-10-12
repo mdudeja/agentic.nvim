@@ -1,94 +1,85 @@
+--- Keymaps.
+---@class Agentic.keymaps
 local M = {}
 
+--- Global keymaps from user config plus sensible fallbacks.
 function M.setup()
-    local map = vim.keymap.set
-    local config = require('agentic.config')
-    local ui = require('agentic.ui.main')
+  local map = vim.keymap.set
+  local config = require("agentic.config")
 
-    -- Parse user config mappings
-    for k, v in pairs(config.options.keys or {}) do
-        local keys, mapping
-        if type(k) == "number" then
-            -- It's an array element like { ["<leader>ct"] = { ... } }
-            keys, mapping = next(v)
-        else
-            -- It's a direct dictionary [ "<leader>ct" ] = { ... }
-            keys = k
-            mapping = v
+  for _, entry in ipairs(config.options.keys or {}) do
+    for keys, mapping in pairs(entry) do
+      mapping = mapping --[[@as table]]
+      local mode = type(mapping) == "table" and mapping.mode or { "n", "v" }
+      local action = type(mapping) == "table" and mapping.action or mapping
+      local desc = type(mapping) == "table" and mapping.desc or "Agentic Action"
+
+      map(mode, keys, function()
+        if action == "toggle" then
+          require("agentic.ui.main").get():toggle()
+        elseif type(action) == "function" then
+          action(require("agentic.ui.main").get())
         end
-
-        local mode = type(mapping) == "table" and mapping.mode or { "n", "v" }
-        local action = type(mapping) == "table" and mapping.action or mapping
-        local desc = type(mapping) == "table" and mapping.desc or "Agentic Action"
-
-        vim.keymap.set(mode, keys, function()
-            if action == "toggle" then
-                ui.get():toggle()
-            elseif type(action) == "function" then
-                action(ui.get())
-            end
-        end, { desc = desc })
+      end, { desc = desc })
     end
+  end
 
-    -- Toggle main view fallback if not in keys
-    map({ "n", "v", "t" }, "<leader>at", "<cmd>AgenticToggle<CR>", { desc = "Toggle Agentic window" })
-
-    -- Add global visual context trigger
-    map("v", "<leader>av", require("agentic.context").global_visual_prompt,
-        { desc = "Agentic: Ask about visual selection" })
+  map({ "n", "v", "t" }, "<leader>at", "<cmd>AgenticToggle<CR>", { desc = "Toggle Agentic UI" })
+  map("v", "<leader>av", require("agentic.context").global_visual_prompt, { desc = "Agentic: Ask about selection" })
 end
 
---- Attach local keymaps to a specific buffer
+--- Buffer-local context picker keymaps for the composer.
 ---@param bufnr integer
 function M.attach(bufnr)
-    local map = vim.keymap.set
-    local opts = { buffer = bufnr, silent = true, nowait = true }
-    local ac = require('agentic.context')
+  local map = vim.keymap.set
+  local opts = { buffer = bufnr, silent = true, nowait = true }
+  local ac = require("agentic.context")
 
-    -- Setup context pickers
-    map("t", ":", function()
-        ac.pick_files()
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Pick Files" }))
-
-    map("t", ",", function()
-        ac.pick_buffers()
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Pick Buffers" }))
-
-    map("t", "@s", function()
-        ac.pick_scope()
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Pick Scope" }))
-
-    map("t", "@v", function()
-        ac.insert_visual()
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Insert Visual Selection" }))
-
-    map("t", "@visual", function()
-        ac.insert_visual()
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Insert Visual Selection" }))
-
-    map("t", "@w", function()
+  local bindings = {
+    { ":", ac.pick_files, "Agentic: Pick files" },
+    { ",", ac.pick_buffers, "Agentic: Pick buffers" },
+    { "@s", ac.pick_scope, "Agentic: Pick scope" },
+    { "@v", ac.insert_visual, "Agentic: Insert visual selection" },
+    { "@visual", ac.insert_visual, "Agentic: Insert visual selection" },
+    {
+      "@w",
+      function()
         ac.insert_workspace(false)
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Insert Workspace Summary" }))
-
-    map("t", "@workspace", function()
+      end,
+      "Agentic: Insert workspace",
+    },
+    {
+      "@workspace",
+      function()
         ac.insert_workspace(false)
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Insert Workspace Summary" }))
-
-    map("t", "@W", function()
+      end,
+      "Agentic: Insert workspace",
+    },
+    {
+      "@W",
+      function()
         ac.insert_workspace(true)
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Refresh & Insert Workspace" }))
-
-    map("t", "@refresh", function()
+      end,
+      "Agentic: Refresh & insert workspace",
+    },
+    {
+      "@refresh",
+      function()
         ac.insert_workspace(true)
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Refresh & Insert Workspace" }))
+      end,
+      "Agentic: Refresh & insert workspace",
+    },
+    { "@k", ac.insert_keymaps, "Agentic: Insert keymaps" },
+    { "@kbd", ac.insert_keymaps, "Agentic: Insert keymaps" },
+    { "@d", ac.pick_diagnostics, "Agentic: Insert diagnostics" },
+    { "@db", ac.pick_diagnostics, "Agentic: Insert diagnostics" },
+    { "@i", ac.pick_image, "Agentic: Insert image" },
+    { "@link", ac.add_link, "Agentic: Insert link" },
+  }
 
-    map("t", "@k", function()
-        ac.insert_keymaps()
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Insert Keymaps" }))
-
-    map("t", "@kbd", function()
-        ac.insert_keymaps()
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Insert Keymaps" }))
+  for _, b in ipairs(bindings) do
+    map({ "n", "i" }, b[1], b[2], vim.tbl_extend("force", opts, { desc = b[3] }))
+  end
 end
 
 return M

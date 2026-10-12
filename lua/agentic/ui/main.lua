@@ -1,240 +1,286 @@
-local util = require("agentic.util")
-local Win = require("agentic.ui.win")
-
+--- Main transcript UI.
+---
+--- Owns the `agentic://main` buffer that renders the conversation, wires the RPC
+--- notification handlers (session updates, questions, terminals, hooks), and
+--- exposes the toggle/show/hide lifecycle plus the composer.
 ---@class Agentic.ui.main: Agentic.ui.win
 local M = {}
 M.__index = M
-setmetatable(M, { __index = Win })
+setmetatable(M, { __index = require("agentic.ui.win") })
 
--- module-local singleteon
+local util = require("agentic.util")
+local api = require("agentic.rpc.api")
+local protocol = require("agentic.rpc.protocol")
+
+-- module-local singleton
 local instance = nil
+local handlers_bound = false
 
+---@return Agentic.ui.main
 function M.get()
   if instance then
     return instance
   end
-
-  local self = setmetatable({}, M)
-  instance = self
-  return self
+  instance = setmetatable({}, M)
+  return instance
 end
 
---- @param opts Agentic.config.win?
+--- Creates the transcript buffer/window if needed and ensures the server is up.
+---@param opts Agentic.config.win?
+---@return Agentic.ui.main?
 function M.new(opts)
   local self = M.get()
-
   self:update_opts("main", opts)
 
-  if self:valid("main") then
-    return self
-  end
-
   local state = util.getState()
-
   local bufnr
 
   if self.opts.fixbuf and state.main_buffer and vim.api.nvim_buf_is_valid(state.main_buffer) then
     bufnr = state.main_buffer
   else
     bufnr = self:create_buf()
-    state.update("main_buffer", bufnr)
   end
 
   if not bufnr then
-    error("Failed to create main buffer")
+    util.notify("Failed to create transcript buffer", vim.log.levels.ERROR)
     return nil
   end
 
+  state.update("main_buffer", bufnr)
+  vim.bo[bufnr].buftype = "nofile"
+  vim.bo[bufnr].bufhidden = "hide"
+  vim.bo[bufnr].swapfile = false
+  vim.bo[bufnr].modifiable = true
   vim.bo[bufnr].filetype = self.opts.ft or "agentic"
-  vim.api.nvim_buf_set_name(bufnr, "agentic://main")
+  pcall(vim.api.nvim_buf_set_name, bufnr, "agentic://main")
 
-  local win_opts = self:compute_win_opts(self.opts)
-  local winnr = self:create_win(bufnr, self.opts.enter, win_opts)
-  state.update("main_window", winnr)
+  if not self:valid("main") then
+    local win_opts = self:compute_win_opts(self.opts)
+    local winnr = self:create_win(bufnr, self.opts.enter, win_opts)
+    state.update("main_window", winnr)
 
-  -- Set custom statusline for this window
-  local statusline = require("agentic.ui.statusline")
-  vim.wo[winnr].statusline = statusline.statusline()
+    if winnr and vim.api.nvim_win_is_valid(winnr) then
+      vim.wo[winnr].statusline = require("agentic.ui.statusline").statusline()
+      vim.wo[winnr].wrap = true
+    end
+  end
 
-  -- Attach local keymaps
   require("agentic.keymaps").attach(bufnr)
+  require("agentic.ui.render").setup_highlights()
+
+  self:_bind_handlers()
+  self:_ensure_server()
+  self:_render_welcome()
 
   return self
 end
 
----@param provider_cmd string
-function M:start_rpc_server(provider_cmd)
+--- Starts the server and initialises the configured provider (once).
+function M:_ensure_server()
+  local client = require("agentic.rpc.client").get()
+  local root = require("agentic.config").root()
+
+  if not client:is_running() then
+    client:start(root)
+  end
+
   local state = util.getState()
-
-  if state.rpc_job_id then
-    return
-  end
-
-  local server_path = vim.fn.stdpath("data") ..
-      "/lazy/agentic.nvim/server/main.ts" -- Assuming standard lazy install path or resolve dynamically
-
-  -- Use a naive relative path resolution for local dev if necessary
-  local dev_path = vim.fn.getcwd() .. "/server/main.ts"
-  if vim.fn.filereadable(dev_path) == 1 then
-    server_path = dev_path
-  end
-
-  local job_id = vim.fn.jobstart({ "bun", "run", server_path }, {
-    rpc = false, -- We are doing raw JSON over stdio, not msgpack RPC
-    cwd = vim.fn.getcwd(),
-    stdout_buffered = false,
-    on_stdout = function(_, data, _)
-      if not data then return end
-      for _, line in ipairs(data) do
-        if line ~= "" then
-          -- Safely attempt to parse the JSON RPC responses and route them to the chat window later
-          local ok, decoded = pcall(vim.json.decode, line)
-          if ok and decoded and decoded.method == "chat_stream" then
-            if state.chat_buffer and vim.api.nvim_buf_is_valid(state.chat_buffer) then
-              local lines = vim.split(decoded.params.text, "\n")
-              vim.api.nvim_buf_set_lines(state.chat_buffer, -1, -1, false, lines)
-              -- Auto-scroll
-              if state.chat_window and vim.api.nvim_win_is_valid(state.chat_window) then
-                local line_count = vim.api.nvim_buf_line_count(state.chat_buffer)
-                vim.api.nvim_win_set_cursor(state.chat_window, { line_count, 0 })
-              end
-            end
-          end
+  if not state.agent_id then
+    local provider = require("agentic.config").options.provider
+    api.init(provider, function(_, err)
+      if err then
+        util.notify("Failed to init agent: " .. tostring(err.message), vim.log.levels.ERROR)
+        return
+      end
+      util.notify("Agent ready (" .. provider .. ")")
+      api.new_session(nil, function(session_result, session_err)
+        if session_err then
+          util.notify("Failed to create session: " .. tostring(session_err.message), vim.log.levels.WARN)
+        elseif session_result then
+          util.notify("Session " .. tostring(session_result.sessionId))
+          M.get():_sync_config_options()
         end
-      end
-    end,
-    on_stderr = function(_, data, _)
-      if data then
-        -- Log silently or to a dedicated debug buffer
-      end
-    end,
-  })
-
-  state.update("rpc_job_id", job_id)
-  state.update("term_opened", true)
-
-  -- Set filetype
-  if state.main_buffer and vim.api.nvim_buf_is_valid(state.main_buffer) then
-    vim.bo[state.main_buffer].filetype = self.opts.ft or "agentic"
+      end)
+    end)
   end
-
-  -- Ensure statusline is still set
-  if state.main_window and vim.api.nvim_win_is_valid(state.main_window) then
-    local statusline = require("agentic.ui.statusline")
-    vim.wo[state.main_window].statusline = statusline.statusline()
-  end
-
-  -- Send initial `init` JSON-RPC payload
-  local init_payload = vim.json.encode({
-    jsonrpc = "2.0",
-    id = 1,
-    method = "init",
-    params = {
-      provider = require("agentic.config").options.provider
-    }
-  })
-
-  vim.fn.chansend(job_id, init_payload .. "\n")
 end
 
----@param cmd string
-function M:reinit(cmd)
+--- Refreshes the session config options (mode/model/…).
+function M:_sync_config_options()
   local state = util.getState()
-
-  -- Ensure old buffer is actively destroyed to kill its background job and UI bounds
-  local chat_state = require("agentic.ui.chat").get()
-
-  if state.chat_buffer and vim.api.nvim_buf_is_valid(state.chat_buffer) then
-    vim.api.nvim_buf_delete(state.chat_buffer, { force = true })
+  if not state.session_id then
+    return
   end
+  api.list_config_options(state.session_id, function()
+    self:_mirror_config_options()
+  end)
+end
 
-  state.update("chat_window", nil)
-  state.update("chat_buffer", nil)
-  state.update("term_opened", false)
-  if state.rpc_job_id then
-    vim.fn.jobstop(state.rpc_job_id)
+--- Mirrors `mode`/`model` out of the config options into flat state for the statusline.
+function M:_mirror_config_options()
+  local state = util.getState()
+  for _, opt in ipairs(state.config_options or {}) do
+    if opt.category == "mode" or opt.id == "mode" then
+      state.update("mode", opt.currentValue)
+    elseif opt.category == "model" or opt.id == "model" then
+      state.update("model", opt.currentValue)
+    end
   end
-  state.update("rpc_job_id", nil)
-  state.update("is_visible", { main = false })
+  if state.main_window and vim.api.nvim_win_is_valid(state.main_window) then
+    vim.wo[state.main_window].statusline = require("agentic.ui.statusline").statusline()
+  end
+end
 
-  local new_self = require("agentic.ui.chat").new(M.get().opts)
-  if new_self then
-    M.get():show()
-    M.get():start_rpc_server(cmd)
+--- Subscribes to server notifications exactly once.
+function M:_bind_handlers()
+  if handlers_bound then
+    return
+  end
+  handlers_bound = true
+
+  local client = require("agentic.rpc.client").get()
+  local render = require("agentic.ui.render")
+
+  client:on_notification(protocol.notifications.SESSION_UPDATE, function(data)
+    local self2 = M.get()
+    local state = util.getState()
+    local update = data.update or {}
+    local kind = data.updateType
+
+    -- Keep session-scoped state in sync.
+    if kind == "config_option_update" then
+      state.update("config_options", update.configOptions or {})
+      self2:_mirror_config_options()
+    elseif kind == "available_commands_update" then
+      state.update("available_commands", update.availableCommands or {})
+    elseif kind == "session_info_update" and update.title then
+      state.update("session_name", update.title)
+    end
+
+    if state.main_buffer and vim.api.nvim_buf_is_valid(state.main_buffer) then
+      render.session_update(state.main_buffer, update)
+      self2:scroll_to_bottom()
+    end
+  end)
+
+  client:on_notification(protocol.notifications.QUESTION, function(data)
+    require("agentic.ui.question").handle(data)
+  end)
+
+  client:on_notification(protocol.notifications.TERMINAL, function(data)
+    require("agentic.ui.terminal").handle(data)
+  end)
+
+  client:on_notification(protocol.notifications.HOOK, function(data)
+    if data.outcome == "deny" or data.outcome == "error" then
+      local level = data.outcome == "error" and "error" or "warn"
+      local msg = string.format("hook %s %s: %s", data.hook, data.outcome, data.reason or "")
+      util.notify(msg, vim.log.levels[level:upper()])
+      local state = util.getState()
+      if state.main_buffer and vim.api.nvim_buf_is_valid(state.main_buffer) then
+        render.notice(state.main_buffer, msg, level)
+      end
+    end
+  end)
+end
+
+function M:_render_welcome()
+  local state = util.getState()
+  local bufnr = state.main_buffer
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  if vim.api.nvim_buf_line_count(bufnr) > 1 then
+    return
+  end
+  local provider = state.provider or require("agentic.config").options.provider
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+    "# Agentic",
+    string.format("provider: %s", provider),
+    "",
+    "Press <CR> in the composer to send. Context keys: : files, , buffers, @s scope, @v visual, @w workspace, @k keymaps.",
+  })
+  require("agentic.ui.render").reset(bufnr)
+end
+
+function M:scroll_to_bottom()
+  local state = util.getState()
+  if
+    state.main_window
+    and vim.api.nvim_win_is_valid(state.main_window)
+    and state.main_buffer
+    and vim.api.nvim_buf_is_valid(state.main_buffer)
+  then
+    local lines = vim.api.nvim_buf_line_count(state.main_buffer)
+    pcall(vim.api.nvim_win_set_cursor, state.main_window, { lines, 0 })
+  end
+end
+
+--- Toggle visibility of the whole UI (transcript + composer).
+---@param opts Agentic.config.win?
+function M:toggle(opts)
+  local state = util.getState()
+  if state.is_visible.main then
+    self:hide()
+  else
+    self:show(opts)
   end
 end
 
 ---@param opts Agentic.config.win?
-function M:toggle(opts)
-  self = M.new(opts)
-
-  if not self then
-    return
-  end
-
-  if not self:valid("main") then
-    return
-  end
-
+function M:show(opts)
   local state = util.getState()
 
-  if state.is_visible and state.is_visible.main then
-    self:hide()
-  else
-    self:show()
-  end
-end
-
-function M:show()
-  if not self:valid("chat") then
-    return
-  end
-
-  local state = util.getState()
-
-  -- Capture the context from where it was called
   state.update("source_buffer", vim.api.nvim_get_current_buf())
   state.update("source_window", vim.api.nvim_get_current_win())
   state.update("source_cursor", vim.api.nvim_win_get_cursor(0))
 
-  vim.api.nvim_set_current_win(state.chat_window)
-  state.update("is_visible", {
-    chat = true,
-  })
-  vim.cmd.startinsert()
+  M.new(opts)
+
+  if not self:valid("main") then
+    return
+  end
+  vim.api.nvim_set_current_win(state.main_window)
+  state.update("is_visible", { main = true })
+
+  -- Open the composer for input.
+  require("agentic.ui.chat").new(self:compute_win_opts(self.opts))
 end
 
 function M:hide()
-  if not self:valid("chat") then
-    return
-  end
-
   local state = util.getState()
-
-  vim.api.nvim_win_hide(state.chat_window)
-  state.update("is_visible", {
-    chat = false,
-  })
+  if self:valid("main") then
+    pcall(vim.api.nvim_win_hide, state.main_window)
+  end
+  if state.chat_window and vim.api.nvim_win_is_valid(state.chat_window) then
+    pcall(vim.api.nvim_win_hide, state.chat_window)
+  end
+  state.update("is_visible", { main = false })
 end
 
 function M:close()
-  if not self:valid("chat") then
-    return
-  end
-
   local state = util.getState()
-
-  vim.api.nvim_win_close(state.chat_window, true)
-  state.update("chat_window", nil)
-  state.update("chat_buffer", nil)
-  state.update("is_visible", {
-    chat = false,
-  })
-  state.update("term_opened", false)
-  if state.rpc_job_id then
-    vim.fn.jobstop(state.rpc_job_id)
+  if self:valid("main") then
+    pcall(vim.api.nvim_win_close, state.main_window, true)
   end
-  state.update("rpc_job_id", nil)
+  if state.chat_window and vim.api.nvim_win_is_valid(state.chat_window) then
+    pcall(vim.api.nvim_win_close, state.chat_window, true)
+  end
+  state.update("main_window", nil)
+  state.update("chat_window", nil)
+  state.update("is_visible", { main = false })
+end
+
+---@param cmd string[]?
+function M:reinit(cmd)
+  if cmd then
+    util.notify("Use :AgenticProvider <name> to switch providers", vim.log.levels.WARN)
+  end
+end
+
+---@param provider_cmd string?
+function M:start_rpc_server(provider_cmd)
+  self:_ensure_server()
 end
 
 return M

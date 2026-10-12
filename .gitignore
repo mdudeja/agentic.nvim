@@ -1,2 +1,5 @@
 *.log
 node_modules/
+.agentic
+# All agentic stuff
+.agentic/

@@ -36,7 +36,7 @@ return {
         local state = vim.b[bufnr].nes_state
         if state then
           local _ = require("copilot-lsp.nes").walk_cursor_start_edit()
-              or (require("copilot-lsp.nes").apply_pending_nes() and require("copilot-lsp.nes").walk_cursor_end_edit())
+            or (require("copilot-lsp.nes").apply_pending_nes() and require("copilot-lsp.nes").walk_cursor_end_edit())
           return nil
         else
           return "<C-i>"
@@ -46,8 +46,8 @@ return {
   },
   {
     "saghen/blink.cmp",
+    version = "1.*",
     event = "InsertEnter",
-    build = "cargo build --release",
     dependencies = {
       "fang2hou/blink-copilot",
       luaSnipDep,
@@ -115,9 +115,21 @@ return {
   },
   "nvim-lua/plenary.nvim",
   {
+    -- Powers the Agentic context pickers and prompts.
+    "folke/snacks.nvim",
+    priority = 1000,
+    lazy = false,
+    opts = {},
+  },
+  {
     "saghen/blink.pairs",
     event = "User FilePost",
-    build = "cargo build --release",
+    build = function()
+      require("blink.pairs").build():pwait(60000)
+    end,
+    dependencies = {
+      "saghen/blink.lib",
+    },
     opts = {
       mappings = {
         enabled = true,
