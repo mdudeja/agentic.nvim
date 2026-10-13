@@ -2,7 +2,7 @@
 local M = {
   major = 1,
   minor = 0,
-  patch = 0,
+  patch = 1,
   -- vim.text.diff
   min_nvim = "0.11.0",
 }

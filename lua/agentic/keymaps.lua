@@ -24,7 +24,7 @@ function M.setup()
     end
   end
 
-  map({ "n", "v", "t" }, "<leader>at", "<cmd>AgenticToggle<CR>", { desc = "Toggle Agentic UI" })
+  map({ "n", "v" }, "<leader>at", "<cmd>AgenticToggle<CR>", { desc = "Toggle Agentic UI" })
   map("v", "<leader>av", require("agentic.context").global_visual_prompt, { desc = "Agentic: Ask about selection" })
   map("n", "<leader>am", "<cmd>AgenticModel<CR>", { desc = "Agentic: Switch model" })
   map("n", "<leader>ao", "<cmd>AgenticMode<CR>", { desc = "Agentic: Switch mode" })

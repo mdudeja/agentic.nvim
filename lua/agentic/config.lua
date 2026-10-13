@@ -128,7 +128,7 @@ local defaults = {
   },
 
   keys = {
-    { ["<leader>ct"] = { action = "toggle", desc = "Toggle Agentic UI", mode = { "n", "t" } } },
+    { ["<leader>ct"] = { action = "toggle", desc = "Toggle Agentic UI", mode = { "n" } } },
   },
 }
 

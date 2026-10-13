@@ -283,7 +283,7 @@ lua/agentic/
   context/init.lua    EditorContext provider (pickers → staged contexts)
   context/mentions.lua  `@` mention parsing/resolution
   cmp/blink.lua       blink.cmp source for `@` mentions
-  deps/init.lua       lazy.nvim specs (incl. edgy/blink/lualine/which-key integration)
+  deps/init.lua       lazy.nvim specs: snacks + optional edgy/blink/lualine/which-key integration
   ui/
     main.lua          transcript buffer + notification wiring
     chat.lua          composer/input buffer
@@ -337,11 +337,11 @@ plus a clickable `󰓛 stop` button while a turn runs.
 
 ## NES (Next Edit Suggestions)
 
-Server-side NES (`client/nes_*`) is **not** wired up yet. Copilot NES continues
-to work independently through
-[copilot-lsp](https://github.com/copilotlsp-nvim/copilot-lsp) (see
-`lua/agentic/deps/init.lua`). Server NES will be added in a later phase once the
-capability is confirmed across providers.
+Server-side NES (`client/nes_*`) is **not** wired up yet. Copilot NES works
+independently of agentic.nvim through
+[copilot-lsp](https://github.com/copilotlsp-nvim/copilot-lsp), set up in your own
+config. Server NES will be added in a later phase once the capability is
+confirmed across providers.
 
 ## Development
 
