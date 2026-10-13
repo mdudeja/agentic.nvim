@@ -3,7 +3,8 @@
 --- switches to the chosen one.
 ---
 --- Switching tears down the current agent server-side and scopes sessions to
---- the new provider, so the transcript is reset and a fresh session started.
+--- the new provider, so the transcript is reset and that provider's session
+--- continued (or a new one started).
 ---@class Agentic.ui.providers
 local M = {}
 
@@ -87,7 +88,8 @@ function M.list(cb)
   end)
 end
 
---- Switches to `id`, then resets the transcript and starts a new session.
+--- Switches to `id`, then resets the transcript and continues that provider's
+--- last session (or starts a new one; see `resume_last_session`).
 ---@param id string
 function M.switch(id)
   local state = util.getState()
@@ -129,12 +131,8 @@ function M.switch(id)
     state.update("available_commands", {})
     require("agentic.ui.settings").mirror()
     main:reset_transcript(string.format("%s %s", info.icon, info.name))
-    api.new_session(nil, function(session_result, session_err)
-      if util.ok(session_result, session_err) then
-        main:_sync_config_options()
-        util.notify("Switched to " .. info.name)
-      end
-    end)
+    util.notify("Switched to " .. info.name)
+    main:start_session()
   end)
 end
 

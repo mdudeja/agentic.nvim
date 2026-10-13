@@ -46,7 +46,9 @@ function M.setup()
     api.new_session(name, function(result, err)
       if ok(result, err) and result then
         notify("Session " .. tostring(result.sessionId))
-        require("agentic.ui.main").get():_sync_config_options()
+        local main = require("agentic.ui.main").get()
+        main:reset_transcript(name or "New session")
+        main:_sync_config_options()
       end
     end)
   end, { nargs = "?", desc = "Agentic: New session" })

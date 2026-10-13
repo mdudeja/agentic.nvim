@@ -49,7 +49,9 @@ With `lazy.nvim`:
 
 1. `:AgenticToggle` (or `<leader>at`) opens the transcript and composer as a
    right-hand sidebar. The server is started and the default provider
-   initialised automatically, and a new session is created.
+   initialised automatically, and the workspace's most recent session is
+   continued (or a new one created if there is none; see
+   `resume_last_session`). Start a fresh one any time with `<leader>an`.
 2. Type a prompt in the composer and press `<CR>` to send it. While it is
    empty, the composer shows a hint with the main keys.
 3. Attached context shows as chips under the prompt (`󰈙 chat.lua:10-20`,
@@ -170,7 +172,7 @@ numbers are matched against the file when the text can be found.
 | Command | Purpose |
 |---------|---------|
 | `:AgenticToggle` | Open/close the UI |
-| `:AgenticProviders` / `:AgenticProvider [name]` | Provider picker (active first, live agents marked) / switch directly. Switching resets the transcript and starts a new session |
+| `:AgenticProviders` / `:AgenticProvider [name]` | Provider picker (active first, live agents marked) / switch directly. Switching resets the transcript and continues that provider's last session |
 | `:AgenticCommands` | Pick an agent slash command (inserted as `/name ` at the start of the prompt) |
 | `:AgenticNewSession [name]` | New session |
 | `:AgenticSessions` | Sessions view (switch, rename, fork, archive, delete, …) |
@@ -325,6 +327,7 @@ require("agentic").setup({
     chat = { anchor = "main", split = "below", padding = 1, size = { height = 0.2 } },
   },
   auto_context = true, -- attach the current file / opening selection
+  resume_last_session = true, -- continue the last session on startup / provider switch
   composer_keys = {
     submit = { "<CR>", "<C-s>" },
     cycle_mode = "<S-Tab>",

@@ -382,8 +382,9 @@ function M.details(s)
   return table.concat(lines, "\n")
 end
 
----@param cb fun(list: Agentic.session[]?)
-local function fetch(cb)
+--- Lists the provider's sessions, normalised and sorted (see `M.sort`).
+---@param cb fun(list: Agentic.session[]?) nil when the request failed
+function M.fetch(cb)
   api.list_sessions(nil, function(result, err)
     if not util.ok(result, err) then
       return cb(nil)
@@ -424,7 +425,7 @@ local function open_snacks(Snacks, list)
             picker:close()
             return
           end
-          fetch(function(fresh)
+          M.fetch(function(fresh)
             if fresh and not picker.closed then
               list = fresh
               picker:refresh()
@@ -499,7 +500,7 @@ function M.open()
     util.notify("Agent not ready yet", vim.log.levels.WARN)
     return
   end
-  fetch(function(list)
+  M.fetch(function(list)
     if not list then
       return
     end

@@ -117,6 +117,16 @@ function M:stop()
   state.update("streaming", false)
 end
 
+--- Lets the server shut down cleanly (it suspends the active session), waiting
+--- at most `timeout_ms`, then stops the client. Used when Neovim exits.
+---@param timeout_ms integer
+function M:shutdown(timeout_ms)
+  if self.transport and self.transport.shutdown then
+    self.transport:shutdown(timeout_ms)
+  end
+  self:stop()
+end
+
 ---@return boolean
 function M:is_running()
   return self.started and self.transport ~= nil and self.transport:is_open()

@@ -100,16 +100,56 @@ function M:_ensure_server()
         return
       end
       util.notify("Agent ready (" .. provider .. ")")
-      api.new_session(nil, function(session_result, session_err)
-        if session_err then
-          util.notify("Failed to create session: " .. tostring(session_err.message), vim.log.levels.WARN)
-        elseif session_result then
-          util.notify("Session " .. tostring(session_result.sessionId))
-          M.get():_sync_config_options()
-        end
-      end)
+      M.get():start_session()
     end)
   end
+end
+
+--- Continues the most recent session the agent can load or resume (when
+--- `resume_last_session` is on), otherwise creates a new one. Falls back to a
+--- new session if continuing fails.
+function M:start_session()
+  local function new_session()
+    api.new_session(nil, function(result, err)
+      if err then
+        util.notify("Failed to create session: " .. tostring(err.message), vim.log.levels.WARN)
+      elseif result then
+        util.notify("Session " .. tostring(result.sessionId))
+        self:_sync_config_options()
+      end
+    end)
+  end
+
+  if not require("agentic.config").options.resume_last_session then
+    return new_session()
+  end
+
+  local sessions = require("agentic.ui.sessions")
+  sessions.fetch(function(list)
+    local last = vim.iter(list or {}):find(function(s)
+      return not s.archived and sessions.switch_method(s) ~= nil
+    end)
+    if not last then
+      return new_session()
+    end
+    local method = sessions.switch_method(last)
+    self:reset_transcript(last.name)
+    local fn = method == "load" and api.load_session or api.resume_session
+    fn(last.id, function(result, err)
+      if err or (result and result.success == false) then
+        local reason = err and err.message or (result and result.error) or "request failed"
+        util.notify(
+          string.format("Could not continue %s (%s); starting a new session", last.name, reason),
+          vim.log.levels.WARN
+        )
+        self:reset_transcript("New session")
+        return new_session()
+      end
+      util.getState().update("session_name", last.name)
+      self:_sync_config_options()
+      util.notify("Continuing " .. last.name)
+    end)
+  end)
 end
 
 --- Refreshes the session config options (mode/model/…).

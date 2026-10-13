@@ -73,12 +73,12 @@ function M.setup()
     end,
   })
 
-  -- Cleanly stop the server on exit.
+  -- Cleanly stop the server on exit, so the session is marked suspended
+  -- rather than left active in the server's DB.
   vim.api.nvim_create_autocmd("VimLeavePre", {
     group = group,
     callback = function()
-      local client = require("agentic.rpc.client").get()
-      client:stop()
+      require("agentic.rpc.client").get():shutdown(1000)
     end,
   })
 end

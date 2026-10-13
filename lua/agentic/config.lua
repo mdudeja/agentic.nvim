@@ -34,6 +34,7 @@
 ---@field win Agentic.config.win?
 ---@field views table<string, Agentic.config.win>?
 ---@field auto_context boolean?
+---@field resume_last_session boolean?
 ---@field composer_keys table<string, string|string[]|false>?
 ---@field keys table<string, { action: string|fun(self: Agentic.ui.main), desc: string, mode: string|string[] }>?
 local M = {}
@@ -45,6 +46,10 @@ local defaults = {
 
   -- Default provider (spawned by the server via ACP).
   provider = "echo",
+
+  -- On startup (and after switching provider), continue the most recent
+  -- session for the workspace instead of creating a new one each time.
+  resume_last_session = true,
 
   -- Known providers and their statusline icons.
   providers = {

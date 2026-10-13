@@ -8,6 +8,7 @@
 ---@field send fun(self: Agentic.rpc.Transport, line: string)
 ---@field close fun(self: Agentic.rpc.Transport)
 ---@field is_open fun(self: Agentic.rpc.Transport): boolean
+---@field shutdown? fun(self: Agentic.rpc.Transport, timeout_ms: integer) -- graceful close; falls back to `close`
 local M = {}
 
 ---@class Agentic.rpc.transport.Stdio: Agentic.rpc.Transport
@@ -90,6 +91,22 @@ function Stdio:close()
   if self.job_id then
     vim.fn.jobstop(self.job_id)
     self.job_id = nil
+  end
+end
+
+--- Graceful stop: EOF on the server's stdin makes it dispose itself (suspend
+--- the active session, stop the agent) and exit. Blocks up to `timeout_ms`
+--- for that, then falls back to `jobstop`.
+---@param timeout_ms integer
+function Stdio:shutdown(timeout_ms)
+  local job = self.job_id
+  if not job then
+    return
+  end
+  self.job_id = nil
+  pcall(vim.fn.chanclose, job, "stdin")
+  if vim.fn.jobwait({ job }, timeout_ms)[1] == -1 then
+    vim.fn.jobstop(job)
   end
 end
 
