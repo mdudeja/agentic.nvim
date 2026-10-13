@@ -35,25 +35,49 @@ function M.handle(data)
   local has_options = options and #options > 0
   local title = has_options and question:match("^[^\n]*") or question
 
-  -- Mirror the question into the transcript so it is not lost.
-  local main = util.getState().main_buffer
-  if main and vim.api.nvim_buf_is_valid(main) then
-    require("agentic.ui.render").notice(main, "Q: " .. title, "warn")
-  end
-
-  -- A permission request for an edit: show the proposed diff while asking.
-  -- The server ids these `permission_<toolCallId>`; option descriptions carry
-  -- the ACP option kind (`allow_once`, `reject_always`, …).
+  -- A permission request for an edit: the server ids these
+  -- `permission_<toolCallId>`; option descriptions carry the ACP option kind
+  -- (`allow_once`, `reject_always`, …).
   local tool_call_id = question_id and question_id:match("^permission_(.+)$")
   local diff = require("agentic.ui.diff")
-  local preview = tool_call_id and diff.show_tool_call(tool_call_id, { focus = false })
-  local function settle(kind)
-    if preview and vim.api.nvim_win_is_valid(preview) then
-      pcall(vim.api.nvim_win_close, preview, true)
+  local reviewable = has_options and tool_call_id and #diff.groups(tool_call_id) > 0
+
+  -- Mirror the question into the transcript so it is not lost.
+  local main = util.getState().main_buffer
+  local question_row
+  if main and vim.api.nvim_buf_is_valid(main) then
+    local render = require("agentic.ui.render")
+    question_row = render.notice(main, "Q: " .. title .. (reviewable and "  (<CR> to review)" or ""), "warn")
+    if reviewable then
+      render.mark(main, question_row, { tool_call_id = tool_call_id })
     end
+  end
+
+  --- Replaces the "(<CR> to review)" hint with the answer given.
+  ---@param answer string
+  local function show_answer(answer)
+    if not question_row or not vim.api.nvim_buf_is_valid(main) then
+      return
+    end
+    local line = vim.api.nvim_buf_get_lines(main, question_row, question_row + 1, false)[1] or ""
+    local answered = line:gsub("  %(<CR> to review%)$", "") .. "  → " .. answer
+    vim.api.nvim_buf_set_lines(main, question_row, question_row + 1, false, { answered })
+  end
+
+  local function settle(kind)
     if tool_call_id then
       diff.resolve(tool_call_id, kind)
     end
+  end
+
+  -- Edits are approved from the diff itself (a/r/… keys; q decides later).
+  if reviewable then
+    diff.review(tool_call_id, options, function(choice)
+      settle(choice.description)
+      show_answer(choice.label or choice.id)
+      respond(question_id, choice.id or choice.label)
+    end)
+    return
   end
 
   if has_options then

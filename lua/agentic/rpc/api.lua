@@ -83,6 +83,7 @@ function M.switch_provider(provider, cb)
       -- The session list is scoped to the provider; reset the active session.
       update("session_id", nil)
       update("session_name", nil)
+      update("quota", nil)
     end)
   end)
 end
@@ -94,6 +95,7 @@ function M.new_session(name, cb)
     finalize(result, err, cb, function(res)
       update("session_id", res.sessionId)
       update("session_name", name)
+      update("quota", nil) -- usage is per session
     end)
   end)
 end
@@ -104,6 +106,7 @@ function M.load_session(session_id, cb)
   client():request(protocol.LOAD_SESSION, { sessionId = session_id }, function(result, err)
     finalize(result, err, cb, function()
       update("session_id", session_id)
+      update("quota", nil) -- usage is per session
     end)
   end)
 end
@@ -153,6 +156,7 @@ function M.resume_session(session_id, cb)
   client():request(protocol.RESUME_SESSION, { sessionId = session_id }, function(result, err)
     finalize(result, err, cb, function()
       update("session_id", session_id)
+      update("quota", nil) -- usage is per session
     end)
   end)
 end

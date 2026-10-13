@@ -9,7 +9,7 @@ M.sections = {
   -- stop button goes in `b`, ahead of lualine's truncation point.
   lualine_b = { { "agentic", item = "cancel", color = "DiagnosticError" }, { "agentic", item = "provider" } },
   lualine_c = { { "agentic", item = "model" }, { "agentic", item = "mode" } },
-  lualine_x = { { "agentic", item = "context" } },
+  lualine_x = { { "agentic", item = "usage" }, { "agentic", item = "context" } },
   lualine_y = { { "agentic", item = "status" } },
   lualine_z = { { "agentic", item = "session" } },
 }
@@ -40,6 +40,7 @@ M.winbar = {
   lualine_x = {
     { "agentic", item = "cancel", color = "DiagnosticError" },
     { "agentic", item = "context", cond = is_prompt },
+    { "agentic", item = "usage", cond = is_transcript },
     { "agentic", item = "status", cond = is_transcript },
   },
 }

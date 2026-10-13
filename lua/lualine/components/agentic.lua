@@ -1,7 +1,8 @@
 --- lualine component for agentic.nvim.
 ---
 --- Usage: `{ "agentic", item = "model" }` where `item` is one of
---- `title`, `provider`, `model`, `mode`, `status`, `session`, `context`, `cancel`.
+--- `title`, `provider`, `model`, `mode`, `status`, `session`, `context`, `usage`,
+--- `cancel`.
 --- `provider`, `model`, `mode` and `session` are clickable (open their picker / view).
 --- `cancel` is a stop button, shown only while a turn is running; clicking it
 --- cancels the turn.
@@ -28,6 +29,7 @@ local clicks = {
 local icons = {
   model = "󰧑 ",
   mode = "󰒓 ",
+  usage = "󰾆 ",
 }
 
 function M:init(options)
@@ -48,7 +50,8 @@ function M:update_status()
   if text ~= "" and icons[item] then
     text = icons[item] .. text
   end
-  return text
+  -- `%` would start a statusline item (e.g. `93%` usage breaks the bar).
+  return require("agentic.ui.statusline").escape(text)
 end
 
 return M

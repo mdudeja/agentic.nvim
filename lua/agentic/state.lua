@@ -67,7 +67,7 @@ local default_state = {
 ---@field mode string? -- current mode (mirrored from config options)
 ---@field model_name string? -- display name of the current model
 ---@field mode_name string? -- display name of the current mode
----@field quota string? -- remaining quota/tokens (if available)
+---@field quota string? -- context usage from the agent's `usage_update`, e.g. "24% · $0.05"
 ---@field pending_questions table<string, table> -- open agentic/question prompts
 ---@field terminals table<string, table> -- editor terminals created for the agent
 ---@field contexts table[] -- staged EditorContext objects for the next prompt

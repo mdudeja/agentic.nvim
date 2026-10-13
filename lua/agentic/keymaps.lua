@@ -30,6 +30,8 @@ function M.setup()
   map("n", "<leader>ao", "<cmd>AgenticMode<CR>", { desc = "Agentic: Switch mode" })
   map("n", "<leader>as", "<cmd>AgenticSessions<CR>", { desc = "Agentic: Sessions" })
   map("n", "<leader>ap", "<cmd>AgenticProviders<CR>", { desc = "Agentic: Switch provider" })
+  map("n", "<leader>ad", "<cmd>AgenticDiff<CR>", { desc = "Agentic: Review latest edit (or pending approval)" })
+  map("n", "<leader>aD", "<cmd>AgenticDiffs<CR>", { desc = "Agentic: Pick from all edits" })
   map("n", "<leader>ax", "<cmd>AgenticCancel<CR>", { desc = "Agentic: Cancel running turn" })
   map("n", "<leader>an", "<cmd>AgenticNewSession<CR>", { desc = "Agentic: New session" })
 end
@@ -42,9 +44,9 @@ function M.attach(bufnr)
   local ac = require("agentic.context")
 
   local bindings = {
-    { ":",  ac.pick_files,    "Pick files" },
-    { ",",  ac.pick_buffers,  "Pick buffers" },
-    { "@s", ac.pick_scope,    "Pick scope (function/class)" },
+    { ":", ac.pick_files, "Pick files" },
+    { ",", ac.pick_buffers, "Pick buffers" },
+    { "@s", ac.pick_scope, "Pick scope (function/class)" },
     { "@v", ac.insert_visual, "Last visual selection" },
     {
       "@w",
@@ -60,10 +62,10 @@ function M.attach(bufnr)
       end,
       "Refresh workspace outline",
     },
-    { "@k", ac.insert_keymaps,   "Keymaps" },
+    { "@k", ac.insert_keymaps, "Keymaps" },
     { "@d", ac.pick_diagnostics, "Pick diagnostics" },
-    { "@i", ac.pick_image,       "Pick image" },
-    { "@l", ac.add_link,         "Link (URL)" },
+    { "@i", ac.pick_image, "Pick image" },
+    { "@l", ac.add_link, "Link (URL)" },
   }
 
   -- Normal mode only: in insert mode these characters are just text (use `@`

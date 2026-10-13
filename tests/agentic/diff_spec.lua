@@ -132,4 +132,104 @@ describe("diff", function()
     -- A status-only update keeps the original title.
     assert.is_truthy(text:find("✔ Edit t2 [completed]", 1, true))
   end)
+
+  describe("review", function()
+    local options = {
+      { id = "allow-once", label = "Allow once", description = "allow_once" },
+      { id = "allow-always", label = "Always allow", description = "allow_always" },
+      { id = "reject-once", label = "Reject", description = "reject_once" },
+      { id = "reject-always", label = "Always reject", description = "reject_always" },
+      { id = "custom", label = "Something else", description = "other" },
+    }
+
+    local function footer(win)
+      local f = vim.api.nvim_win_get_config(win).footer
+      return type(f) == "table" and f[1][1] or f
+    end
+
+    local function press(key)
+      vim.api.nvim_feedkeys(vim.keycode(key), "x", false)
+    end
+
+    before_each(function()
+      diff.record(tool("p1", { { type = "diff", path = file, oldText = "l5", newText = "L5" } }))
+    end)
+
+    after_each(function()
+      for _, w in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_config(w).relative ~= "" then
+          pcall(vim.api.nvim_win_close, w, true)
+        end
+      end
+    end)
+
+    it("shows the options on keys and answers with the chosen one", function()
+      local chosen
+      local win = diff.review("p1", options, function(o)
+        chosen = o
+      end)
+      assert.is_truthy(win)
+      assert.are.equal(win, vim.api.nvim_get_current_win())
+      assert.are.equal(
+        " a Allow once · A Always allow · r Reject · R Always reject · 1 Something else · q later ",
+        footer(win)
+      )
+      press("r")
+      assert.are.equal("reject-once", chosen.id)
+      assert.is_false(vim.api.nvim_win_is_valid(win))
+      assert.is_false(diff.has_review("p1"))
+    end)
+
+    it("q leaves the request pending and open_review brings it back", function()
+      local chosen
+      local win = diff.review("p1", options, function(o)
+        chosen = o
+      end)
+      press("q")
+      assert.is_false(vim.api.nvim_win_is_valid(win))
+      assert.is_nil(chosen)
+      assert.is_true(diff.has_review("p1"))
+
+      local again = diff.open_review("p1")
+      assert.is_truthy(again)
+      press("a")
+      assert.are.equal("allow-once", chosen.id)
+    end)
+
+    it("has nothing to review for a tool call without a diff", function()
+      assert.is_nil(diff.review("unknown", options, function() end))
+      assert.is_false(diff.has_review("unknown"))
+    end)
+
+    it("transcript <CR> on an edit line opens its pending review", function()
+      local render = require("agentic.ui.render")
+      local bufnr = vim.api.nvim_create_buf(false, true)
+      render.reset(bufnr)
+      render.tool_call(bufnr, tool("p1", {}, { status = "pending" }))
+      diff.review("p1", options, function() end)
+      press("q")
+
+      vim.api.nvim_set_current_buf(bufnr)
+      local rows = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      for i, l in ipairs(rows) do
+        if l:find("↳", 1, true) then
+          vim.api.nvim_win_set_cursor(0, { i, 0 })
+        end
+      end
+      require("agentic.ui.main").activate()
+      local cfg = vim.api.nvim_win_get_config(vim.api.nvim_get_current_win())
+      assert.is_truthy(cfg.relative ~= "")
+      assert.is_truthy(footer(vim.api.nvim_get_current_win()):find("a Allow once", 1, true))
+    end)
+
+    it("marks a failed edit's file lines as not applied", function()
+      local render = require("agentic.ui.render")
+      local bufnr = vim.api.nvim_create_buf(false, true)
+      render.reset(bufnr)
+      render.tool_call(bufnr, tool("p1", {}, { status = "pending" }))
+      render.tool_call(bufnr, { toolCallId = "p1", status = "failed" })
+      local text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+      assert.is_truthy(text:find("target.txt (+1/-1) — not applied", 1, true))
+    end)
+  end)
 end)

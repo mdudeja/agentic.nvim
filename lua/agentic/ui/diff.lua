@@ -14,6 +14,10 @@
 --- New files arrive with `oldText` null (`vim.NIL`) or `""`. Approval is per
 --- tool call: records start `pending`, become `applied` when the tool call
 --- completes, and are dropped when the edit is rejected or fails.
+---
+--- When the agent asks permission for an edit, `review` shows the proposed
+--- diff with the permission options on keys (`a` allow, `r` reject, …). `q`
+--- closes it and leaves the request pending; `open_review` reopens it.
 ---@class Agentic.ui.diff
 local M = {}
 
@@ -37,6 +41,17 @@ local records = {}
 local seq = 0
 ---@type table<string, string> tool call id -> title
 local titles = {}
+
+---@class Agentic.diff.review
+---@field options table[] -- `{ id, label, description = <ACP option kind> }`
+---@field on_choice fun(option: table)
+
+--- Permission requests awaiting the user's answer, by tool call id.
+---@type table<string, Agentic.diff.review>
+local reviews = {}
+
+--- Review keys for the ACP permission option kinds.
+local KIND_KEYS = { allow_once = "a", allow_always = "A", reject_once = "r", reject_always = "R" }
 
 ---@param v any
 ---@return string
@@ -329,8 +344,9 @@ end
 
 --- Opens a float with the given groups' diff.
 ---@param groups Agentic.diff.group[]
----@param opts? { focus?: boolean, title?: string }
+---@param opts? { focus?: boolean, title?: string, footer?: string }
 ---@return integer? win
+---@return integer? buf
 function M.show(groups, opts)
   opts = opts or {}
   if #groups == 0 then
@@ -358,17 +374,120 @@ function M.show(groups, opts)
     border = "rounded",
     title = " " .. (opts.title or ("Diff: " .. rel(groups[1].path))) .. " ",
     title_pos = "center",
+    footer = opts.footer,
+    footer_pos = opts.footer and "center" or nil,
   })
   for _, key in ipairs({ "q", "<Esc>" }) do
     vim.keymap.set("n", key, function()
       pcall(vim.api.nvim_win_close, win, true)
     end, { buffer = buf, nowait = true, desc = "Close diff" })
   end
+  return win, buf
+end
+
+--- Keys for a permission's options: by ACP kind, else 1, 2, ….
+---@param options table[]
+---@return { key: string, option: table }[]
+local function option_keys(options)
+  local out, used, n = {}, {}, 0
+  for _, opt in ipairs(options) do
+    local key = KIND_KEYS[opt.description]
+    if not key or used[key] then
+      n = n + 1
+      key = tostring(n)
+    end
+    used[key] = true
+    out[#out + 1] = { key = key, option = opt }
+  end
+  return out
+end
+
+--- Shows a tool call's proposed edit for approval. The option keys answer
+--- (`on_choice`); `q` closes the window and leaves the request pending.
+--- Returns the window, or nil when the tool call has no diff to show.
+---@param id string
+---@param options table[]
+---@param on_choice fun(option: table)
+---@return integer?
+function M.review(id, options, on_choice)
+  if #M.groups(id) == 0 then
+    return nil
+  end
+  reviews[id] = { options = options, on_choice = on_choice }
+  return M.open_review(id)
+end
+
+--- (Re)opens a pending review. Nil when the tool call has none.
+---@param id string
+---@return integer?
+function M.open_review(id)
+  local review = reviews[id]
+  local groups = review and M.groups(id) or {}
+  if #groups == 0 then
+    return nil
+  end
+  local keys = option_keys(review.options)
+  local footer = {}
+  for _, k in ipairs(keys) do
+    footer[#footer + 1] = k.key .. " " .. (k.option.label or k.option.id)
+  end
+  footer[#footer + 1] = "q later"
+  local win, buf = M.show(groups, {
+    title = "Review: " .. (titles[id] or rel(groups[1].path)),
+    footer = " " .. table.concat(footer, " · ") .. " ",
+  })
+  if not win or not buf then
+    return nil
+  end
+  for _, k in ipairs(keys) do
+    vim.keymap.set("n", k.key, function()
+      local pending = reviews[id]
+      reviews[id] = nil
+      pcall(vim.api.nvim_win_close, win, true)
+      if pending then
+        pending.on_choice(k.option)
+      end
+    end, { buffer = buf, nowait = true, desc = k.option.label or k.option.id })
+  end
+  for _, lhs in ipairs({ "q", "<Esc>" }) do
+    vim.keymap.set("n", lhs, function()
+      pcall(vim.api.nvim_win_close, win, true)
+      if reviews[id] then
+        util.notify("Edit still awaits your approval: <CR> on it in the transcript, or :AgenticDiff")
+      end
+    end, { buffer = buf, nowait = true, desc = "Decide later" })
+  end
   return win
 end
 
---- Opens the most recent diff (all files of that tool call).
+---@param id string
+---@return boolean
+function M.has_review(id)
+  return reviews[id] ~= nil
+end
+
+--- Forgets pending reviews (the turn they belonged to ended).
+function M.clear_reviews()
+  reviews = {}
+end
+
+--- The newest tool call with a pending review, if any.
+---@return string?
+local function latest_review()
+  for _, g in ipairs(M.groups()) do
+    if reviews[g.tool_call_id] then
+      return g.tool_call_id
+    end
+  end
+end
+
+--- Opens the pending review, else the most recent diff (all files of that
+--- tool call).
 function M.open_last()
+  local pending = latest_review()
+  if pending and M.open_review(pending) then
+    return
+  end
   local latest = M.groups()[1]
   if not latest then
     util.notify("No agent diffs recorded yet", vim.log.levels.WARN)
@@ -419,7 +538,7 @@ function M.pick()
       preview = "preview",
       confirm = function(picker, item)
         picker:close()
-        if item then
+        if item and not M.open_review(item.group.tool_call_id) then
           M.show({ item.group })
         end
       end,
@@ -427,7 +546,7 @@ function M.pick()
     return
   end
   util.select(groups, { prompt = "Agent diffs", format_item = label }, function(g)
-    if g then
+    if g and not M.open_review(g.tool_call_id) then
       M.show({ g })
     end
   end)
@@ -435,7 +554,7 @@ end
 
 --- Forgets all recorded diffs (e.g. when switching sessions).
 function M.clear()
-  records, titles = {}, {}
+  records, titles, reviews = {}, {}, {}
 end
 
 return M

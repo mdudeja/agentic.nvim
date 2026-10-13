@@ -74,9 +74,8 @@ function M.new(opts)
 
   if not vim.b[bufnr].agentic_keys then
     vim.b[bufnr].agentic_keys = true
-    for _, lhs in ipairs({ "gf", "<CR>" }) do
-      vim.keymap.set("n", lhs, M.open_under_cursor, { buffer = bufnr, desc = "Agentic: Open file/link under cursor" })
-    end
+    vim.keymap.set("n", "<CR>", M.activate, { buffer = bufnr, desc = "Agentic: Review edit / open file under cursor" })
+    vim.keymap.set("n", "gf", M.open_under_cursor, { buffer = bufnr, desc = "Agentic: Open file/link under cursor" })
   end
 
   require("agentic.ui.render").setup_highlights()
@@ -87,6 +86,28 @@ function M.new(opts)
   self:_render_welcome()
 
   return self
+end
+
+--- `<CR>` in the transcript: on an edit (tool call row, `↳ file` line or its
+--- permission question) opens the review if one is pending, else the diff;
+--- anywhere else opens the file under the cursor.
+function M.activate()
+  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local target = require("agentic.ui.render").target_at(vim.api.nvim_get_current_buf(), row)
+  if target then
+    local diff = require("agentic.ui.diff")
+    if diff.open_review(target.tool_call_id) then
+      return
+    end
+    local groups = vim.tbl_filter(function(g)
+      return not target.path or g.path == target.path
+    end, diff.groups(target.tool_call_id))
+    if #groups > 0 then
+      diff.show(groups)
+      return
+    end
+  end
+  M.open_under_cursor()
 end
 
 --- Opens the file (or URL) under the cursor in the editor window, never in
@@ -226,6 +247,9 @@ function M:_bind_handlers()
       end
     elseif kind == "available_commands_update" then
       state.update("available_commands", update.availableCommands or {})
+    elseif kind == "usage_update" then
+      -- Shown in the transcript header next to the session.
+      state.update("quota", require("agentic.ui.render").usage_text(update))
     elseif kind == "session_info_update" and update.title then
       state.update("session_name", update.title)
     end

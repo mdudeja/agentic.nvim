@@ -20,8 +20,17 @@ function M.setup_highlights()
 end
 
 --- Plain-text pieces of the agentic status, shared by the fallback winbar and
---- the lualine component (`lua/lualine/components/agentic.lua`).
+--- the lualine component (`lua/lualine/components/agentic.lua`). They are
+--- plain text: escape them (`M.escape`) before putting them in a bar.
 M.parts = {}
+
+--- Escapes text for a statusline/winbar, where `%` starts an item (e.g. the
+--- `93%` of context usage would otherwise make the whole bar invalid).
+---@param text string
+---@return string
+function M.escape(text)
+  return (text:gsub("%%", "%%%%"))
+end
 
 ---@return string
 function M.parts.provider()
@@ -74,6 +83,12 @@ function M.parts.session()
     return state.session_name
   end
   return state.session_id and state.session_id:sub(1, 8) or ""
+end
+
+--- Context usage reported by the agent, e.g. `24% · $0.05`.
+---@return string
+function M.parts.usage()
+  return util.getState().quota or ""
 end
 
 ---@return string
@@ -167,21 +182,24 @@ function M.winbar(name, width, right_text, right_hl)
   local right_styled
   if right_text then
     right_plain = right_text .. " "
-    right_styled = string.format("%%#%s#%s%%#AgenticWinbar# ", right_hl or "AgenticWinbar", right_text)
+    right_styled = string.format("%%#%s#%s%%#AgenticWinbar# ", right_hl or "AgenticWinbar", M.escape(right_text))
   else
     local sess = session_part()
     if sess ~= "" then
       right_plain = string.format("%s │ %s │ %s ", provider_part(), status_text(), sess)
       right_styled = string.format(
         " %s │ %%#AgenticWinbarStatus#%s%%#AgenticWinbar# │ %s ",
-        provider_part(),
-        status_text(),
-        sess
+        M.escape(provider_part()),
+        M.escape(status_text()),
+        M.escape(sess)
       )
     else
       right_plain = string.format("%s │ %s ", provider_part(), status_text())
-      right_styled =
-        string.format(" %s │ %%#AgenticWinbarStatus#%s%%#AgenticWinbar# ", provider_part(), status_text())
+      right_styled = string.format(
+        " %s │ %%#AgenticWinbarStatus#%s%%#AgenticWinbar# ",
+        M.escape(provider_part()),
+        M.escape(status_text())
+      )
     end
   end
 
@@ -202,7 +220,7 @@ function M.winbar(name, width, right_text, right_hl)
     fill = math.max(width - used, 0)
   end
 
-  local left = string.format("%%#AgenticWinbarTitle#%s ", title)
+  local left = string.format("%%#AgenticWinbarTitle#%s ", M.escape(title))
   left = left .. string.format("%%#AgenticWinbar#%s", string.rep("─", fill))
 
   return left .. right_styled
@@ -212,8 +230,8 @@ end
 --- `laststatus` is not 3).
 ---@return string
 function M.statusline()
-  local parts = { provider_part(), status_text() }
-  local right = session_part()
+  local parts = { M.escape(provider_part()), M.escape(status_text()) }
+  local right = M.escape(session_part())
   local left = " " .. table.concat(parts, " │ ")
   if right ~= "" then
     return left .. "%=" .. " " .. right .. " "

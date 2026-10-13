@@ -161,12 +161,30 @@ older server every action is offered and refusals are reported. Without snacks,
 ### Reviewing agent edits
 
 Each file an agent edits gets a line under its tool call in the transcript,
-with exact `+added/-removed` counts (and `(new file)` / `(deleted)`). When the
-agent asks permission for an edit, the proposed diff opens above the
-Allow/Reject picker and closes when you answer. Approval covers the whole tool
-call; ACP has no per-hunk accept.
+with exact `+added/-removed` counts (and `(new file)` / `(deleted)`). Press
+`<CR>` on that line to see the file's diff, or on the tool call row to see
+every file it changed (`gf` opens the file itself).
 
-`:AgenticDiff` shows the latest edit; `:AgenticDiffs` picks from every edit this
+**Approving edits.** When the agent asks permission for an edit, a review
+window opens with the proposed diff and the choices in its footer:
+
+| Key | Answer |
+|-----|--------|
+| `a` | allow once |
+| `A` | always allow |
+| `r` | reject |
+| `R` | always reject |
+| `q` / `<Esc>` | decide later: the agent keeps waiting |
+
+To come back to a request you deferred, press `<CR>` on its `Q: Permission
+Requested …` line (or the edit's lines) in the transcript, `<leader>ad`, or
+`:AgenticDiff`. Options an agent adds beyond those four get `1`, `2`, ….
+Approval covers the whole tool call; ACP has no per-hunk accept, and an edit
+the agent has already applied can't be rejected from here. Permission requests
+that aren't edits (e.g. running a command) use a picker instead.
+
+`:AgenticDiff` (`<leader>ad`) shows the pending review or else the latest edit;
+`:AgenticDiffs` (`<leader>aD`) picks from every edit this
 session (newest first, with a preview). Rejected or failed edits are dropped;
 switching sessions clears the list. Each change is diffed from what the agent
 sent (`oldText` → `newText`), which works whether the agent sends a snippet
@@ -295,7 +313,7 @@ sources = {
 extensions = { "agentic" }
 -- or place components anywhere:
 lualine_x = { { "agentic", item = "model" }, { "agentic", item = "mode" } }
--- items: title, provider, model, mode, status, session, context, cancel
+-- items: title, provider, model, mode, status, session, context, usage, cancel
 -- (`cancel` is a stop button shown while a turn runs; click it to cancel)
 ```
 

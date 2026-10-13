@@ -71,4 +71,38 @@ describe("render content blocks", function()
     render.notice(bufnr, "Permission Requested: Edit x\n\nOptions:\n1. Allow\n", "warn")
     assert.are.same({ "▲ Permission Requested: Edit x", "  Options:", "  1. Allow" }, lines())
   end)
+
+  it("formats usage with ACP's cost object (and a bare number)", function()
+    local update = { used = 48000, size = 200000, cost = { amount = 0.048, currency = "USD" } }
+    assert.are.equal("48k/200k tokens (24%) · $0.0480", render.usage_text(update, true))
+    assert.are.equal("24% · $0.05", render.usage_text(update))
+    assert.are.equal(
+      "1.5M tokens · 2.00 EUR",
+      render.usage_text({ used = 1500000, cost = { amount = 2, currency = "EUR" } })
+    )
+    assert.are.equal("12k tokens · $0.01", render.usage_text({ used = 12000, cost = 0.01 }))
+  end)
+
+  it("updates consecutive usage in place", function()
+    for _, used in ipairs({ 12000, 48000, 185000 }) do
+      render.session_update(bufnr, { sessionUpdate = "usage_update", used = used, size = 200000 })
+    end
+    assert.are.same({ "󰾆 185k/200k tokens (93%)" }, lines())
+    chunk({ type = "text", text = "hi" })
+    render.session_update(bufnr, { sessionUpdate = "usage_update", used = 190000, size = 200000 })
+    assert.are.equal("󰾆 190k/200k tokens (95%)", lines()[#lines()])
+    assert.are.equal(4, #lines())
+  end)
+
+  it("escapes % so the fallback winbar stays valid", function()
+    package.loaded["agentic.ui.statusline"] = nil
+    local statusline = require("agentic.ui.statusline")
+    local state = require("agentic.state").get()
+    state.update("session_name", "Session 1")
+    state.update("quota", "93% · $0.18")
+    local bar = statusline.winbar("Agentic", 100)
+    local ok, res = pcall(vim.api.nvim_eval_statusline, bar, { maxwidth = 100 })
+    assert.is_true(ok, tostring(res))
+    assert.is_truthy(res.str:find("93% · $0.18", 1, true))
+  end)
 end)

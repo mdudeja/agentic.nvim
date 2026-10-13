@@ -34,7 +34,7 @@ local hl = {
 local function ensure(bufnr)
   local st = buffers[bufnr]
   if not st then
-    st = { role = nil, tool_lines = {}, tool_counts = {} }
+    st = { role = nil, tool_lines = {}, tool_counts = {}, targets = {} }
     buffers[bufnr] = st
     vim.api.nvim_buf_clear_namespace(bufnr, vim.api.nvim_create_namespace("agentic_render"), 0, -1)
   end
@@ -75,7 +75,7 @@ end
 
 ---@param bufnr integer
 function M.reset(bufnr)
-  buffers[bufnr] = { role = nil, tool_lines = {}, tool_counts = {} }
+  buffers[bufnr] = { role = nil, tool_lines = {}, tool_counts = {}, targets = {} }
   vim.api.nvim_buf_clear_namespace(bufnr, vim.api.nvim_create_namespace("agentic_render"), 0, -1)
 end
 
@@ -223,6 +223,7 @@ end
 ---@param bufnr integer
 ---@param text string
 ---@param level? "info" | "warn" | "error"
+---@return integer row 0-based row of the notice's first line
 function M.notice(bufnr, text, level)
   local prefix = level == "error" and "✖ " or (level == "warn" and "▲ " or "• ")
   -- Buffer lines can't contain newlines; continuation lines align under the text.
@@ -236,7 +237,28 @@ function M.notice(bufnr, text, level)
     end
   end
   table.insert(lines, 1, "")
+  local row = vim.api.nvim_buf_line_count(bufnr) + 1
   append_lines(bufnr, lines, hl.notice)
+  return row
+end
+
+--- Marks a transcript line as pointing at something `<CR>` opens (a tool
+--- call's diff, a pending review). Lines are only appended or rewritten in
+--- place, so the row stays valid until the transcript is reset.
+---@param bufnr integer
+---@param row integer 0-based
+---@param target { tool_call_id: string, path?: string }
+function M.mark(bufnr, row, target)
+  ensure(bufnr).targets[row] = target
+end
+
+--- What the line at `row` (0-based) points at, if anything.
+---@param bufnr integer
+---@param row integer
+---@return { tool_call_id: string, path?: string }?
+function M.target_at(bufnr, row)
+  local st = buffers[bufnr]
+  return st and st.targets[row] or nil
 end
 
 --- Renders a tool call or tool-call update, updating the existing row in place.
@@ -268,6 +290,21 @@ function M.tool_call(bufnr, update)
     append_lines(bufnr, { "", line }, hl.tool)
     if id then
       st.tool_lines[id] = vim.api.nvim_buf_line_count(bufnr) - 1
+      M.mark(bufnr, st.tool_lines[id], { tool_call_id = id })
+    end
+  end
+
+  -- A failed (or rejected) edit was not applied and its diff is gone: say so
+  -- on its file lines rather than offer a review.
+  if status == "failed" and id then
+    local prefix = tostring(id) .. "\0"
+    for key, at in pairs(st.tool_counts) do
+      if key:sub(1, #prefix) == prefix then
+        local old = vim.api.nvim_buf_get_lines(bufnr, at, at + 1, false)[1] or ""
+        local new = old:gsub(" — <CR> to review$", " — not applied")
+        vim.api.nvim_buf_set_lines(bufnr, at, at + 1, false, { new })
+        st.targets[at] = nil
+      end
     end
   end
 
@@ -276,7 +313,7 @@ function M.tool_call(bufnr, update)
   for _, t in ipairs(touched) do
     local suffix = t.kind == "add" and " (new file)" or (t.kind == "delete" and " (deleted)" or "")
     local summary = string.format(
-      "   ↳ %s%s (+%d/-%d) — :AgenticDiff to review",
+      "   ↳ %s%s (+%d/-%d) — <CR> to review",
       vim.fn.fnamemodify(t.path, ":."),
       suffix,
       t.added,
@@ -290,6 +327,9 @@ function M.tool_call(bufnr, update)
       st.role = nil
       append_lines(bufnr, { summary }, hl.meta)
       st.tool_counts[key] = vim.api.nvim_buf_line_count(bufnr) - 1
+      if id then
+        M.mark(bufnr, st.tool_counts[key], { tool_call_id = id, path = t.path })
+      end
     end
   end
 end
@@ -306,13 +346,58 @@ function M.plan(bufnr, update)
   end
 end
 
+--- `12k`, `1.5M`: compact token counts.
+---@param n number
+---@return string
+local function tokens(n)
+  if n >= 1e6 then
+    return (string.format("%.1fM", n / 1e6):gsub("%.0M$", "M"))
+  elseif n >= 1e3 then
+    return string.format("%dk", math.floor(n / 1e3 + 0.5))
+  end
+  return tostring(math.floor(n))
+end
+
+--- ACP `usage_update` as text: `48k/200k tokens (24%) · $0.0480`, or with
+--- `long = false` just `24% · $0.05` (for the header).
+---@param update table
+---@param long boolean?
+---@return string
+function M.usage_text(update, long)
+  local used, size = tonumber(update.used), tonumber(update.size)
+  local parts = {}
+  if used and size and size > 0 then
+    local pct = string.format("%d%%", math.floor(used / size * 100 + 0.5))
+    parts[1] = long and string.format("%s/%s tokens (%s)", tokens(used), tokens(size), pct) or pct
+  elseif used then
+    parts[1] = tokens(used) .. " tokens"
+  end
+  -- ACP sends `{ amount, currency }`; older agents a bare number.
+  local cost = update.cost
+  local amount = type(cost) == "table" and tonumber(cost.amount) or tonumber(cost)
+  if amount then
+    local currency = type(cost) == "table" and cost.currency or "USD"
+    local fmt = long and "%.4f" or "%.2f"
+    parts[#parts + 1] = currency == "USD" and ("$" .. string.format(fmt, amount))
+      or (string.format(fmt, amount) .. " " .. tostring(currency))
+  end
+  return table.concat(parts, " · ")
+end
+
 ---@param bufnr integer
 ---@param update table
 function M.usage(bufnr, update)
-  local used = update.used or update.tokensUsed or "?"
-  local size = update.size or update.contextSize or "?"
-  local cost = update.cost and string.format(" (%.4f)", update.cost) or ""
-  append_lines(bufnr, { string.format("tokens: %s/%s%s", used, size, cost) }, hl.usage)
+  local st = ensure(bufnr)
+  local line = "󰾆 " .. M.usage_text(update, true)
+  -- Usage arrives repeatedly; while nothing else was written since, update
+  -- the same line instead of stacking new ones.
+  local last = vim.api.nvim_buf_line_count(bufnr) - 1
+  if st.usage_line == last then
+    vim.api.nvim_buf_set_lines(bufnr, last, last + 1, false, { line })
+    return
+  end
+  append_lines(bufnr, { line }, hl.usage)
+  st.usage_line = vim.api.nvim_buf_line_count(bufnr) - 1
 end
 
 --- Dispatches a single ACP session update payload.

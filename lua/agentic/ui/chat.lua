@@ -415,6 +415,8 @@ function M:submit()
     end, contexts)
 
     api.ask(text, payload, function(_, err)
+        -- Unanswered permission requests died with the turn.
+        require("agentic.ui.diff").clear_reviews()
         if err then
             util.notify("ask failed: " .. tostring(err.message), vim.log.levels.ERROR)
             local main = util.getState().main_buffer
