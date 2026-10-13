@@ -213,6 +213,8 @@ function M:_render_welcome()
     { key(keys.pick_mode), "pick mode" },
     { key(keys.pick_model), "pick model" },
     { key(keys.sessions), "sessions (switch, rename, fork, delete…)" },
+    { key(keys.pick_provider), "switch provider" },
+    { key(keys.commands), "agent slash commands (or type / at the start)" },
     { ": ,", "pick files / buffers (normal mode)" },
     { key(keys.help), "all composer keys (normal mode)" },
   }

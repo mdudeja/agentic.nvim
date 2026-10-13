@@ -2,10 +2,13 @@
 ---
 --- Usage: `{ "agentic", item = "model" }` where `item` is one of
 --- `title`, `provider`, `model`, `mode`, `status`, `session`, `context`.
---- `model`, `mode` and `session` are clickable (open their picker / view).
+--- `provider`, `model`, `mode` and `session` are clickable (open their picker / view).
 local M = require("lualine.component"):extend()
 
 local clicks = {
+  provider = function()
+    require("agentic.ui.providers").open()
+  end,
   model = function()
     require("agentic.ui.settings").pick_model()
   end,

@@ -29,6 +29,7 @@ function M.setup()
   map("n", "<leader>am", "<cmd>AgenticModel<CR>", { desc = "Agentic: Switch model" })
   map("n", "<leader>ao", "<cmd>AgenticMode<CR>", { desc = "Agentic: Switch mode" })
   map("n", "<leader>as", "<cmd>AgenticSessions<CR>", { desc = "Agentic: Sessions" })
+  map("n", "<leader>ap", "<cmd>AgenticProviders<CR>", { desc = "Agentic: Switch provider" })
   map("n", "<leader>an", "<cmd>AgenticNewSession<CR>", { desc = "Agentic: New session" })
 end
 

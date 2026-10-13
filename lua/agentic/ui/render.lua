@@ -249,7 +249,7 @@ function M.session_update(bufnr, update)
   elseif kind == "available_commands_update" then
     local n = #(update.availableCommands or {})
     if n > 0 then
-      M.notice(bufnr, string.format("%d command(s) available", n))
+      M.notice(bufnr, string.format("%d command(s) available (type / in the prompt)", n))
     end
   elseif kind == "compaction_update" then
     M.notice(bufnr, "context compacted")

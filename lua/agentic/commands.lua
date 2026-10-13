@@ -20,41 +20,26 @@ function M.setup()
   end, { desc = "Agentic: Toggle UI", nargs = 0 })
 
   vim.api.nvim_create_user_command("AgenticProviders", function()
-    local names = config.provider_names()
-    util.select(names, { prompt = "Select provider" }, function(choice)
-      if not choice then
-        return
-      end
-      config.options.provider = choice
-      api.switch_provider(choice, function(result, err)
-        if ok(result, err) then
-          notify("Switched to " .. choice)
-          require("agentic.ui.main").get():_sync_config_options()
-        end
-      end)
-    end)
+    require("agentic.ui.providers").open()
   end, { desc = "Agentic: Pick provider" })
 
   vim.api.nvim_create_user_command("AgenticProvider", function(opts)
-    local provider = opts.args
-    if not config.options.providers[provider] then
-      notify("Unknown provider: " .. provider, vim.log.levels.ERROR)
-      return
+    if opts.args == "" then
+      require("agentic.ui.providers").open()
+    else
+      require("agentic.ui.providers").switch(opts.args)
     end
-    config.options.provider = provider
-    api.switch_provider(provider, function(result, err)
-      if ok(result, err) then
-        notify("Switched to " .. provider)
-        require("agentic.ui.main").get():_sync_config_options()
-      end
-    end)
   end, {
-    nargs = 1,
-    desc = "Agentic: Switch provider",
+    nargs = "?",
+    desc = "Agentic: Switch provider (no argument opens the picker)",
     complete = function()
       return config.provider_names()
     end,
   })
+
+  vim.api.nvim_create_user_command("AgenticCommands", function()
+    require("agentic.ui.slash").pick()
+  end, { desc = "Agentic: Pick an agent slash command" })
 
   vim.api.nvim_create_user_command("AgenticNewSession", function(opts)
     local name = opts.args ~= "" and opts.args or nil

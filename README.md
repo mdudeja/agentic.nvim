@@ -84,6 +84,12 @@ Mentions are plain text: they stay in the prompt, are highlighted when they
 resolve, and are read when you send (unsaved buffer contents win over disk).
 `foo@bar.com` and unknown `@names` are left alone.
 
+**Agent commands:** many agents (e.g. OpenCode) advertise slash commands per
+session; the transcript notes how many. Type `/` at the start of the prompt to
+complete them (blink.cmp), or press `/` in normal mode (or `:AgenticCommands`)
+for a picker. The command is inserted as `/name ` and sent as part of the
+prompt, with anything you type after it as its input.
+
 **Pickers (normal mode in the composer):**
 
 | Key | Picks |
@@ -112,12 +118,14 @@ with the selection attached, ready for your question.
 | `<C-o>` | n, i | pick model |
 | `<M-m>` | n, i | pick mode |
 | `<M-s>` | n, i | sessions view |
+| `<M-p>` | n, i | switch provider |
+| `/` | n | pick one of the agent's slash commands (in insert mode, typing `/` at the start of the prompt completes them) |
 | `?` | n | show all composer keys (which-key, or a small float) |
 | `q` | n | close the UI |
 
 Rebind or disable (`false`) any of these via `composer_keys`. Globally:
-`<leader>am` model, `<leader>ao` mode, `<leader>as` sessions, `<leader>an` new
-session.
+`<leader>am` model, `<leader>ao` mode, `<leader>as` sessions, `<leader>ap`
+provider, `<leader>an` new session.
 
 ### Sessions
 
@@ -162,7 +170,8 @@ numbers are matched against the file when the text can be found.
 | Command | Purpose |
 |---------|---------|
 | `:AgenticToggle` | Open/close the UI |
-| `:AgenticProvider <name>` / `:AgenticProviders` | Switch provider |
+| `:AgenticProviders` / `:AgenticProvider [name]` | Provider picker (active first, live agents marked) / switch directly. Switching resets the transcript and starts a new session |
+| `:AgenticCommands` | Pick an agent slash command (inserted as `/name ` at the start of the prompt) |
 | `:AgenticNewSession [name]` | New session |
 | `:AgenticSessions` | Sessions view (switch, rename, fork, archive, delete, …) |
 | `:AgenticRenameSession [name]` | Rename active session |
@@ -322,6 +331,8 @@ require("agentic").setup({
     pick_model = "<C-o>",
     pick_mode = "<M-m>",
     sessions = "<M-s>",
+    pick_provider = "<M-p>",
+    commands = "/",
     toggle_auto_context = "<C-x>",
     clear_contexts = "<C-c>",
     help = "?",

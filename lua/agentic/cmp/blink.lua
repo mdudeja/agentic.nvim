@@ -1,10 +1,11 @@
---- blink.cmp source for `@` mentions in the composer.
+--- blink.cmp source for `@` mentions and `/` agent commands in the composer.
 ---
 --- Typing `@` offers keywords (`@selection`, `@diagnostics`, …), open buffers
 --- and workspace files. Accepting one inserts a plain-text token (see
 --- `agentic.context.mentions`) that stays visible in the prompt and is
 --- resolved into a context on send. `@image` / `@link` instead open a picker
---- or input and stage the result directly.
+--- or input and stage the result directly. `/` at the start of the prompt
+--- offers the agent's slash commands.
 ---
 --- Enable it with:
 ---   sources.providers.agentic = { name = "Agentic", module = "agentic.cmp.blink" }
@@ -26,7 +27,35 @@ function M:enabled()
 end
 
 function M:get_trigger_characters()
-  return { "@" }
+  return { "@", "/" }
+end
+
+--- Agent slash commands, offered only while typing `/…` at the very start of
+--- the prompt (where the agent looks for them).
+---@return table[]? # nil when the cursor isn't in a leading `/word`
+local function command_items(ctx)
+  local before = ctx.line:sub(1, ctx.cursor[2])
+  if ctx.cursor[1] ~= 1 or not before:match("^/%S*$") then
+    return nil
+  end
+  local kinds = require("blink.cmp.types").CompletionItemKind
+  local range = {
+    start = { line = 0, character = 0 },
+    ["end"] = { line = 0, character = ctx.cursor[2] },
+  }
+  local items = {}
+  for _, cmd in ipairs(require("agentic.ui.slash").list()) do
+    items[#items + 1] = {
+      label = "/" .. cmd.name,
+      filterText = cmd.name,
+      textEdit = { newText = "/" .. cmd.name .. " ", range = range },
+      kind = kinds.Function,
+      kind_icon = "",
+      labelDetails = { description = cmd.hint and ("<" .. cmd.hint .. ">") or nil },
+      documentation = cmd.description ~= "" and cmd.description or nil,
+    }
+  end
+  return items
 end
 
 ---@return string[]
@@ -52,6 +81,12 @@ end
 
 function M:get_completions(ctx, callback)
   local empty = { items = {}, is_incomplete_forward = false, is_incomplete_backward = false }
+
+  local commands = command_items(ctx)
+  if commands then
+    callback({ items = commands, is_incomplete_forward = false, is_incomplete_backward = false })
+    return
+  end
 
   -- Locate the `@` that starts the word under the cursor.
   local before = ctx.line:sub(1, ctx.cursor[2])
