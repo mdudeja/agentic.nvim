@@ -111,6 +111,97 @@ function M.append_text(bufnr, role, text)
   hl_lines(bufnr, role_hl, from, to)
 end
 
+--- Appends whole lines (a non-text content block) under a role's section,
+--- starting on a fresh line so it doesn't run into streamed text, and leaving
+--- an empty line for the text that follows.
+---@param bufnr integer
+---@param role "user" | "assistant" | "thought" | "tool" | "plan" | "system"
+---@param lines string[]
+function M.append_block(bufnr, role, lines)
+  local st = ensure(bufnr)
+  local count = vim.api.nvim_buf_line_count(bufnr)
+  local last = vim.api.nvim_buf_get_lines(bufnr, count - 1, count, false)[1] or ""
+  local lead = (st.role == role and last ~= "") and "\n" or ""
+  M.append_text(bufnr, role, lead .. table.concat(lines, "\n") .. "\n")
+end
+
+--- How a resource URI is shown: a workspace-relative path for files (so `gf`
+--- opens it), else the name or the URI itself (`gx` opens web links).
+---@param uri string?
+---@param name string?
+---@return string label
+---@return string? path
+local function resource_label(uri, name)
+  if type(uri) == "string" and uri:match("^file://") then
+    local path = vim.uri_to_fname(uri)
+    return vim.fn.fnamemodify(path, ":~:."), path
+  end
+  return (type(uri) == "string" and uri) or name or "resource", nil
+end
+
+--- Code-fence language for a resource, from its path or MIME type.
+---@param path string?
+---@param mime string?
+---@return string
+local function fence_lang(path, mime)
+  local ft = path and vim.filetype.match({ filename = path })
+  if ft then
+    return ft
+  end
+  local subtype = type(mime) == "string" and mime:match("^%w+/x?%-?([%w+.-]+)") or nil
+  return subtype and (vim.filetype.match({ filename = "x." .. subtype }) or subtype) or ""
+end
+
+--- Lines for a non-text ACP content block, or nil for text (which streams).
+--- `brief` (the user's own messages) shows embedded resources as a reference
+--- only: they are usually files the user attached.
+---@param block any
+---@param brief boolean?
+---@return string[]?
+function M._block_lines(block, brief)
+  if type(block) ~= "table" or block.type == nil or block.type == "text" then
+    return nil
+  end
+  local kind = block.type
+  if kind == "resource_link" then
+    local label = resource_label(block.uri, block.name)
+    local about = block.title or block.description
+    return { "󰈙 " .. label .. (type(about) == "string" and about ~= "" and ("  " .. about) or "") }
+  elseif kind == "resource" then
+    local res = type(block.resource) == "table" and block.resource or {}
+    local label, path = resource_label(res.uri, res.name)
+    if type(res.text) ~= "string" then
+      return { string.format("󰈙 %s (binary%s)", label, res.mimeType and (", " .. res.mimeType) or "") }
+    end
+    if brief then
+      return { "󰈙 " .. label }
+    end
+    local lines = { "󰈙 " .. label, "```" .. fence_lang(path, res.mimeType) }
+    vim.list_extend(lines, vim.split(res.text:gsub("\n$", ""), "\n", { plain = true }))
+    lines[#lines + 1] = "```"
+    return lines
+  elseif kind == "image" then
+    return { string.format("󰋩 image (%s)%s", block.mimeType or "?", block.uri and ("  " .. block.uri) or "") }
+  elseif kind == "audio" then
+    return { string.format("󰎆 audio (%s)", block.mimeType or "?") }
+  end
+  return { "[" .. tostring(kind) .. "]" }
+end
+
+--- Renders one message chunk: text streams into the section, other content
+--- blocks (resources, images, …) get their own lines.
+---@param bufnr integer
+---@param role "user" | "assistant" | "thought"
+---@param update table
+function M.chunk(bufnr, role, update)
+  local lines = M._block_lines(update.content, role == "user")
+  if lines then
+    M.append_block(bufnr, role, lines)
+  else
+    M.append_text(bufnr, role, M._chunk_text(update))
+  end
+end
+
 --- Echoes a sent prompt, followed by a dim line listing what was attached.
 ---@param bufnr integer
 ---@param text string
@@ -219,16 +310,16 @@ end
 function M.session_update(bufnr, update)
   local kind = update.sessionUpdate or update.session_update
   if kind == "agent_message_chunk" then
-    M.append_text(bufnr, "assistant", M._chunk_text(update))
+    M.chunk(bufnr, "assistant", update)
   elseif kind == "agent_thought_chunk" then
-    M.append_text(bufnr, "thought", M._chunk_text(update))
+    M.chunk(bufnr, "thought", update)
   elseif kind == "user_message_chunk" then
     -- The composer already echoes the prompt locally for responsiveness; the
     -- server's echo of the current turn would duplicate it. Loaded/replayed
     -- history (not during a turn) is still rendered.
     local streaming = require("agentic.state").get().streaming
     if not streaming then
-      M.append_text(bufnr, "user", M._chunk_text(update))
+      M.chunk(bufnr, "user", update)
     end
   elseif kind == "tool_call" or kind == "tool_call_update" then
     M.tool_call(bufnr, update)
