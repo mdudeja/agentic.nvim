@@ -282,6 +282,13 @@ function M.summarize_session(session_id, cb)
   client():request(protocol.SUMMARIZE_SESSION, { sessionId = session_id }, cb)
 end
 
+--- Cancels the session's running turn; the pending `ask` then completes.
+---@param session_id? string defaults to the active session
+---@param cb? fun(result: table?, err: table?)
+function M.cancel_turn(session_id, cb)
+  client():request(protocol.CANCEL_TURN, { sessionId = session_id }, cb)
+end
+
 ---@param cb? fun(result: table?, err: table?)
 function M.dispose(cb)
   client():request(protocol.DISPOSE, {}, function(result, err)

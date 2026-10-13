@@ -115,6 +115,7 @@ with the selection attached, ready for your question.
 | Key | Mode | Action |
 |-----|------|--------|
 | `<CR>` / `<C-s>` | n, i | send (`<CR>` accepts the completion item instead while the menu is open) |
+| `<C-c>` | n, i | cancel the running turn (when idle: clears staged contexts in normal mode, leaves insert mode in insert mode) |
 | `<C-x>` | n, i | leave the current file/selection out of the next prompt (press again to restore) |
 | `<S-Tab>` | n, i | cycle mode (selects the previous item while the completion menu is open) |
 | `<C-o>` | n, i | pick model |
@@ -127,7 +128,7 @@ with the selection attached, ready for your question.
 
 Rebind or disable (`false`) any of these via `composer_keys`. Globally:
 `<leader>am` model, `<leader>ao` mode, `<leader>as` sessions, `<leader>ap`
-provider, `<leader>an` new session.
+provider, `<leader>an` new session, `<leader>ax` cancel the running turn.
 
 ### Sessions
 
@@ -173,6 +174,8 @@ numbers are matched against the file when the text can be found.
 |---------|---------|
 | `:AgenticToggle` | Open/close the UI |
 | `:AgenticProviders` / `:AgenticProvider [name]` | Provider picker (active first, live agents marked) / switch directly. Switching resets the transcript and continues that provider's last session |
+| `:AgenticTerminals` | Show the agent's terminal (a picker when there are several) |
+| `:AgenticCancel` | Cancel the running turn (the agent stops; pending permission prompts are rejected) |
 | `:AgenticCommands` | Pick an agent slash command (inserted as `/name ` at the start of the prompt) |
 | `:AgenticNewSession [name]` | New session |
 | `:AgenticSessions` | Sessions view (switch, rename, fork, archive, delete, …) |
@@ -217,8 +220,15 @@ The server may also ask the editor to act:
 
 - **`agentic/question`** → a picker (when options are supplied) or text prompt;
   the answer is returned via `client/answer`.
-- **`agentic/terminal`** → run the command in a real terminal buffer and reply
-  via `client/terminal` (`create`/`get_output`/`wait_exit`/`kill`/`release`).
+- **`agentic/terminal`** → run the command in an agent shell and reply via
+  `client/terminal` (`create`/`get_output`/`wait_exit`/`kill`/`release`).
+  The first command opens a hidden terminal running your shell; later ones
+  reuse it while it is idle, and another one opens only when commands overlap.
+  With snacks.nvim these are `Snacks.terminal`s, so they show/hide with your
+  other terminals; `:AgenticTerminals` opens one (a picker when there are
+  several) either way. Each command shows as `$ <command>` plus its output
+  (stdout and stderr; the command's output is piped, so it is not a TTY), and
+  `kill` sends it Ctrl-C without closing the shell.
 - **`agentic/hook`** → surfaced in the transcript and notifications.
 
 ### Modules
@@ -264,7 +274,8 @@ lua/agentic/
   (title · provider · model · mode · contexts · status · session) and a header
   per window: the transcript shows session and status, the composer shows model,
   mode and context count. Clicking model or mode opens its picker; clicking the
-session opens the sessions view.
+session opens the sessions view. While a turn runs, a `󰓛 stop` button
+appears; clicking it cancels the turn.
 - **which-key.nvim**: adds the `<leader>a` group and a composer `@` group.
 
 Not using `import`? Configure them yourself:
@@ -279,11 +290,13 @@ sources = {
 extensions = { "agentic" }
 -- or place components anywhere:
 lualine_x = { { "agentic", item = "model" }, { "agentic", item = "mode" } }
--- items: title, provider, model, mode, status, session, context
+-- items: title, provider, model, mode, status, session, context, cancel
+-- (`cancel` is a stop button shown while a turn runs; click it to cancel)
 ```
 
 Without lualine (or without the extension), agentic falls back to its own
-winbar: a title, `<icon> Provider model (mode)`, a status dot, and the session.
+winbar: a title, `<icon> Provider model (mode)`, a status dot, and the session,
+plus a clickable `󰓛 stop` button while a turn runs.
 
 ## NES (Next Edit Suggestions)
 
@@ -337,6 +350,7 @@ require("agentic").setup({
     pick_provider = "<M-p>",
     commands = "/",
     toggle_auto_context = "<C-x>",
+    cancel_turn = "<C-c>",
     clear_contexts = "<C-c>",
     help = "?",
     close = "q",

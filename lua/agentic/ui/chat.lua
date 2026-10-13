@@ -145,11 +145,27 @@ function M:_bind_keys(bufnr)
         require("agentic.ui.slash").pick()
     end, "Agent commands")
 
-    bind("n", keys.clear_contexts, function()
+    local function clear_contexts()
         util.getState().clear_contexts()
         M.get():_refresh_chip()
         util.notify("Contexts cleared")
-    end, "Clear staged contexts")
+    end
+    bind("n", keys.clear_contexts, clear_contexts, "Clear staged contexts")
+
+    -- Bound after `clear_contexts`: they share `<C-c>` by default, and with no
+    -- turn running the key keeps its usual meaning.
+    for _, lhs in ipairs(key_list(keys.cancel_turn)) do
+        local shares_clear = vim.tbl_contains(key_list(keys.clear_contexts), lhs)
+        bind({ "n", "i" }, lhs, function()
+            if util.getState().streaming then
+                M.get():cancel_turn()
+            elseif vim.fn.mode() == "i" then
+                vim.cmd("stopinsert")
+            elseif shares_clear then
+                clear_contexts()
+            end
+        end, shares_clear and "Cancel running turn / clear staged contexts" or "Cancel running turn")
+    end
 
     bind("n", keys.close, function()
         require("agentic.ui.main").get():hide()
@@ -411,6 +427,24 @@ function M:submit()
         if chat_window and vim.api.nvim_win_is_valid(chat_window) then
             vim.api.nvim_set_current_win(chat_window)
             vim.cmd("startinsert!")
+        end
+    end)
+end
+
+--- Stops the running turn. The pending `ask` completes once the agent stops.
+function M:cancel_turn()
+    local state = util.getState()
+    if not state.streaming then
+        util.notify("No turn is running", vim.log.levels.WARN)
+        return
+    end
+    api.cancel_turn(state.session_id, function(result, err)
+        if not util.ok(result, err) then
+            return
+        end
+        local main = state.main_buffer
+        if main and vim.api.nvim_buf_is_valid(main) then
+            require("agentic.ui.render").notice(main, "turn cancelled", "warn")
         end
     end)
 end

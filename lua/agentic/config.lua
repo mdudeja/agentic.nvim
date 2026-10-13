@@ -121,6 +121,7 @@ local defaults = {
     pick_provider = "<M-p>", -- normal + insert: switch provider
     commands = "/", -- normal: pick an agent slash command (insert mode: type `/` for completion)
     toggle_auto_context = "<C-x>", -- normal + insert: skip/restore the current file for one prompt
+    cancel_turn = "<C-c>", -- normal + insert: stop the running turn (when idle: clear contexts / leave insert)
     clear_contexts = "<C-c>", -- normal
     help = "?", -- normal
     close = "q", -- normal

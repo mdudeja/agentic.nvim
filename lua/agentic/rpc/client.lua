@@ -158,7 +158,10 @@ function M:notify(method, params)
   if not self:is_running() then
     return
   end
-  self.transport:send(protocol.encode_request(method, params, protocol.next_request_id("ntf")))
+  -- A caller-supplied `requestId` correlates a reply with the server's own
+  -- request (e.g. `client/terminal`), so it must reach the server unchanged.
+  local request_id = params.requestId or protocol.next_request_id("ntf")
+  self.transport:send(protocol.encode_request(method, params, request_id))
 end
 
 --- Registers a handler for a server notification method.

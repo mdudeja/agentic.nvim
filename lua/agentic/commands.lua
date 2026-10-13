@@ -37,6 +37,14 @@ function M.setup()
     end,
   })
 
+  vim.api.nvim_create_user_command("AgenticTerminals", function()
+    require("agentic.ui.terminal").pick()
+  end, { desc = "Agentic: Show the agent's terminal (picker when there are several)" })
+
+  vim.api.nvim_create_user_command("AgenticCancel", function()
+    require("agentic.ui.chat").get():cancel_turn()
+  end, { desc = "Agentic: Cancel the running turn" })
+
   vim.api.nvim_create_user_command("AgenticCommands", function()
     require("agentic.ui.slash").pick()
   end, { desc = "Agentic: Pick an agent slash command" })

@@ -1,8 +1,10 @@
 --- lualine component for agentic.nvim.
 ---
 --- Usage: `{ "agentic", item = "model" }` where `item` is one of
---- `title`, `provider`, `model`, `mode`, `status`, `session`, `context`.
+--- `title`, `provider`, `model`, `mode`, `status`, `session`, `context`, `cancel`.
 --- `provider`, `model`, `mode` and `session` are clickable (open their picker / view).
+--- `cancel` is a stop button, shown only while a turn is running; clicking it
+--- cancels the turn.
 local M = require("lualine.component"):extend()
 
 local clicks = {
@@ -17,6 +19,9 @@ local clicks = {
   end,
   session = function()
     require("agentic.ui.sessions").open()
+  end,
+  cancel = function()
+    require("agentic.ui.chat").get():cancel_turn()
   end,
 }
 

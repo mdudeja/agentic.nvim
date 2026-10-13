@@ -58,6 +58,15 @@ describe("rpc.client", function()
     assert.is_string(decoded.data.params.requestId)
   end)
 
+  it("keeps a caller-supplied requestId on notifications", function()
+    -- `client/terminal` replies must carry the server's own request id.
+    client:notify("client/terminal", { requestId = "terminal_req_1", response = { request = "create" } })
+    client:notify("client/terminal", { response = {} })
+
+    assert.are.equal("terminal_req_1", vim.json.decode(fake.sent[1]).data.params.requestId)
+    assert.is_truthy(vim.json.decode(fake.sent[2]).data.params.requestId:match("^ntf_"))
+  end)
+
   it("correlates a response back to the caller by id", function()
     local captured
     client:request("client/init", { provider = "echo" }, function(result, err)

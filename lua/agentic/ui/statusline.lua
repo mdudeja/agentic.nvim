@@ -16,6 +16,7 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, "AgenticWinbarStatus", { link = "Special", default = true })
   vim.api.nvim_set_hl(0, "AgenticWinbarTitle", { link = "Title", default = true })
   vim.api.nvim_set_hl(0, "AgenticPadding", { link = "NormalFloat", default = true })
+  vim.api.nvim_set_hl(0, "AgenticWinbarCancel", { link = "DiagnosticError", default = true })
 end
 
 --- Plain-text pieces of the agentic status, shared by the fallback winbar and
@@ -53,6 +54,17 @@ function M.parts.status()
     return spinner[math.floor(vim.uv.now() / 250) % #spinner + 1] .. " running"
   end
   return "● ready"
+end
+
+--- A stop button, shown only while a turn is running (click to cancel it).
+---@return string
+function M.parts.cancel()
+  return util.getState().streaming and "󰓛 stop" or ""
+end
+
+--- Click handler for the fallback winbar's stop button (`%@…@`).
+function M.on_cancel_click()
+  require("agentic.ui.chat").get():cancel_turn()
 end
 
 ---@return string
@@ -112,6 +124,22 @@ local function session_part()
   return table.concat(parts, " ")
 end
 
+--- The clickable stop button for the fallback winbar, plus its plain text
+--- (for width measuring). Both empty while no turn is running.
+---@return string styled
+---@return string plain
+local function cancel_button()
+  local text = M.parts.cancel()
+  if text == "" then
+    return "", ""
+  end
+  return string.format(
+    "%%@v:lua.require'agentic.ui.statusline'.on_cancel_click@%%#AgenticWinbarCancel#%s%%#AgenticWinbar#%%X │ ",
+    text
+  ),
+    text .. " │ "
+end
+
 --- Summarises the attached contexts, e.g. `2 contexts`.
 ---@return string
 local function contexts_summary()
@@ -156,6 +184,12 @@ function M.winbar(name, width, right_text, right_hl)
         string.format(" %s │ %%#AgenticWinbarStatus#%s%%#AgenticWinbar# ", provider_part(), status_text())
     end
   end
+
+  -- A stop button leads the right-hand side while a turn is running.
+  local stop_styled, stop_plain = cancel_button()
+  right_plain = stop_plain .. right_plain
+  local lead, rest = right_styled:match("^( ?)(.*)$")
+  right_styled = lead .. stop_styled .. rest
 
   -- Plain-text left half (no highlight codes) so widths can be measured.
   local plain_left = title .. " "

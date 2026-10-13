@@ -248,6 +248,7 @@ function M:_render_welcome()
   local rows = {
     { "@", "mention a file, buffer, @selection, @diagnostics…" },
     { key(keys.submit), "send" },
+    { key(keys.cancel_turn), "cancel the running turn" },
     { key(keys.toggle_auto_context), "skip the (current) file for one prompt" },
     { key(keys.cycle_mode), "cycle mode" },
     { key(keys.pick_mode), "pick mode" },

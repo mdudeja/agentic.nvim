@@ -38,6 +38,7 @@ local M = {}
 ---| "client/export_session"
 ---| "client/import_session"
 ---| "client/summarize_session"
+---| "client/cancel_turn"
 ---| "client/stats"
 ---| "client/index"
 ---| "client/list_config_options"
@@ -86,6 +87,7 @@ M.client_methods = {
   EXPORT_SESSION = "client/export_session",
   IMPORT_SESSION = "client/import_session",
   SUMMARIZE_SESSION = "client/summarize_session",
+  CANCEL_TURN = "client/cancel_turn",
   STATS = "client/stats",
   INDEX = "client/index",
   LIST_CONFIG_OPTIONS = "client/list_config_options",

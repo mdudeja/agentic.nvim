@@ -1,192 +1,318 @@
 --- Handles server `agentic/terminal` notifications.
 ---
---- The agent needs to run a shell command in the editor. We spawn it in a real
---- terminal buffer, capture output, and answer each request
---- (`create`, `get_output`, `wait_exit`, `kill`, `release`) via `client/terminal`.
+--- The agent's shell commands run in persistent editor terminals ("agent
+--- shells") rather than one throwaway terminal per command. The first command
+--- opens a shell; later ones reuse it while it is idle, and another shell is
+--- opened only when commands overlap (e.g. a dev server plus a test run). The
+--- shells are `Snacks.terminal`s when snacks is available, so they toggle with
+--- the user's other terminals; `:AgenticTerminals` shows them either way.
+---
+--- Each command is typed into a shell as a short script that runs it in a
+--- subshell (so `cd`/`export` don't leak into the shell), copies its output
+--- (stdout and stderr) to a file with `tee` (exact text, unlike the terminal
+--- screen, which wraps and scrolls), and reports the exit code with a private
+--- OSC sequence, which the terminal does not draw and Neovim surfaces as
+--- `TermRequest`.
+---
+--- Requests (`create`, `get_output`, `wait_exit`, `kill`, `release`) are
+--- answered via `client/terminal`.
 ---@class Agentic.ui.terminal
 local M = {}
 
 local util = require("agentic.util")
 local api = require("agentic.rpc.api")
 
+--- Private OSC number for the end-of-command marker.
+local OSC = "6973"
+
+---@class Agentic.ui.terminal.Shell
+---@field n integer -- 1-based number, shown in titles and the picker
+---@field buf integer
+---@field job integer
+---@field win table? -- the `Snacks.terminal` window, when snacks is used
+---@field alive boolean
+---@field current Agentic.ui.terminal.Record? -- the command running in it
+---@field last string? -- the last command run in it
+
 ---@class Agentic.ui.terminal.Record
----@field job_id integer
----@field buf_id integer
----@field exit_code integer?
----@field signal integer?
+---@field id string -- ACP terminal id
+---@field shell Agentic.ui.terminal.Shell
+---@field command string
+---@field files { script: string, out: string, code: string }
 ---@field running boolean
+---@field exit_code integer?
+---@field output string? -- captured once the command has finished
 ---@field waiters fun()[]
+---@field output_limit integer? -- ACP `outputByteLimit`: keep at most this many trailing bytes
+
+---@type Agentic.ui.terminal.Shell[]
+local shells = {}
 
 ---@type table<string, Agentic.ui.terminal.Record>
 local terminals = {}
 
----@param term_id string
----@return Agentic.ui.terminal.Record?
-local function get(term_id)
-  return terminals[term_id]
+---@param s string
+---@return string
+local function shell_quote(s)
+  return "'" .. s:gsub("'", "'\\''") .. "'"
 end
 
---- Reads the full terminal buffer as a single string.
----@param buf_id integer
+--- One-line transcript notice, so a command run for the agent is visible.
+---@param text string
+---@param level string?
+local function notice(text, level)
+  local main = util.getState().main_buffer
+  if main and vim.api.nvim_buf_is_valid(main) then
+    require("agentic.ui.render").notice(main, text, level)
+  end
+end
+
+---@param path string
 ---@return string
-local function read_output(buf_id)
-  if not vim.api.nvim_buf_is_valid(buf_id) then
+local function read_file(path)
+  local fd = io.open(path, "rb")
+  if not fd then
     return ""
   end
-  local lines = vim.api.nvim_buf_get_lines(buf_id, 0, -1, false)
-  return table.concat(lines, "\n")
+  local data = fd:read("*a") or ""
+  fd:close()
+  return data
 end
 
----@param term_id string
+--- The command's output so far, without trailing blank lines. With a byte
+--- limit, keeps the tail.
 ---@param record Agentic.ui.terminal.Record
-local function finalize(term_id, record)
+---@return string output
+---@return boolean truncated
+local function read_output(record)
+  local output = (record.output or read_file(record.files.out)):gsub("%s+$", "")
+  local limit = record.output_limit
+  if limit and #output > limit then
+    -- Drop leading bytes, then any partial UTF-8 sequence at the cut.
+    output = output:sub(#output - limit + 1):gsub("^[\128-\191]+", "")
+    return output, true
+  end
+  return output, false
+end
+
+--- Marks a command finished: captures its output, removes its files and
+--- answers anyone waiting for it.
+---@param record Agentic.ui.terminal.Record
+---@param code integer
+local function finish(record, code)
+  if not record.running then
+    return
+  end
   record.running = false
+  record.exit_code = code
+  record.output = read_file(record.files.out)
+  for _, path in pairs(record.files) do
+    os.remove(path)
+  end
+  if record.shell.current == record then
+    record.shell.current = nil
+  end
   local waiters = record.waiters
   record.waiters = {}
   for _, fn in ipairs(waiters) do
     fn()
   end
-  -- Best-effort cleanup of the record once nobody is waiting.
-  vim.schedule(function()
-    if terminals[term_id] == record and #record.waiters == 0 then
-      -- Keep the buffer around until `release`; only drop bookkeeping if the
-      -- buffer is already gone.
-      if not vim.api.nvim_buf_is_valid(record.buf_id) then
-        terminals[term_id] = nil
-      end
-    end
-  end)
+  notice(string.format("$ %s → exit %d", record.command, code), code == 0 and "info" or "warn")
 end
 
---- Converts the ACP `env` array into the map expected by jobstart.
----@param env any
----@return table<string, string>?
-local function normalize_env(env)
-  if type(env) ~= "table" then
-    return nil
+--- Handles the end-of-command marker: `ESC ] 6973 ; end ; <id> ; <code>`.
+---@param shell Agentic.ui.terminal.Shell
+---@param sequence string
+local function on_osc(shell, sequence)
+  local id, code = sequence:match("^\27%]" .. OSC .. ";end;([^;]+);(%-?%d+)")
+  local record = shell.current
+  if id and record and record.id == id then
+    finish(record, tonumber(code) --[[@as integer]])
   end
-  local out = {}
-  for _, item in ipairs(env) do
-    if type(item) == "table" and item.name then
-      out[item.name] = tostring(item.value or "")
-    end
-  end
-  return next(out) and out or nil
 end
 
----@param params table
-local function handle_create(params)
-  local term_id = params.terminalId
-  local cmd = params.command
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].buftype = "nofile"
-  vim.bo[buf].bufhidden = "hide"
-  vim.bo[buf].swapfile = false
-  pcall(vim.api.nvim_buf_set_name, buf, "agentic://term/" .. tostring(term_id))
+--- Starts a new agent shell (hidden). Returns nil and a message on failure.
+---@return Agentic.ui.terminal.Shell?
+---@return string? err
+local function open_shell()
+  local n = #shells + 1
+  local cwd = require("agentic.config").root()
+  -- Marks the shell's environment (and keeps its snacks id unique).
+  local env = { AGENTIC_TERMINAL = tostring(n) }
+  local shell = { n = n, alive = true, buf = -1, job = -1 } ---@type Agentic.ui.terminal.Shell
 
-  local record ---@type Agentic.ui.terminal.Record
-  local job_id = vim.fn.jobstart(cmd, {
-    cwd = params.cwd,
-    env = normalize_env(params.env),
-    term = true,
-    pty = true,
-    on_exit = function(_, code, signal)
-      if record then
-        record.exit_code = code
-        record.signal = signal
-        finalize(term_id, record)
+  local ok_snacks, Snacks = pcall(require, "snacks")
+  if ok_snacks and Snacks.terminal then
+    local ok, win = pcall(Snacks.terminal.open, nil, {
+      cwd = cwd,
+      env = env,
+      count = 100 + n,
+      interactive = false,
+      win = { enter = false },
+    })
+    if not ok or not win or not win.buf then
+      return nil, "failed to open a terminal: " .. tostring(win)
+    end
+    -- `open` always shows the window; hide it before the next redraw.
+    win:hide()
+    shell.win, shell.buf = win, win.buf
+  else
+    shell.buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[shell.buf].bufhidden = "hide"
+    local ok, err = pcall(vim.api.nvim_buf_call, shell.buf, function()
+      vim.fn.jobstart(vim.o.shell, { cwd = cwd, env = env, term = true })
+    end)
+    if not ok then
+      vim.api.nvim_buf_delete(shell.buf, { force = true })
+      return nil, tostring(err)
+    end
+  end
+
+  shell.job = vim.b[shell.buf].terminal_job_id
+  if not shell.job or shell.job <= 0 then
+    return nil, "failed to start " .. vim.o.shell
+  end
+  pcall(vim.api.nvim_buf_set_name, shell.buf, "agentic://shell/" .. n)
+  vim.b[shell.buf].agentic_shell = n
+
+  vim.api.nvim_create_autocmd("TermRequest", {
+    buffer = shell.buf,
+    callback = function(args)
+      on_osc(shell, args.data and args.data.sequence or "")
+    end,
+  })
+  vim.api.nvim_create_autocmd({ "TermClose", "BufWipeout" }, {
+    buffer = shell.buf,
+    once = true,
+    callback = function()
+      shell.alive = false
+      if shell.current then
+        finish(shell.current, -1)
       end
     end,
   })
 
-  if job_id <= 0 then
-    vim.api.nvim_buf_delete(buf, { force = true })
-    return nil, "failed to start command"
+  shells[n] = shell
+  return shell
+end
+
+--- An idle agent shell, opening one when all are busy (or none exist).
+---@return Agentic.ui.terminal.Shell?
+---@return string? err
+local function idle_shell()
+  for _, shell in ipairs(shells) do
+    if shell.alive and not shell.current and vim.api.nvim_buf_is_valid(shell.buf) then
+      return shell
+    end
+  end
+  return open_shell()
+end
+
+--- Writes the script that runs `command` and reports its exit code.
+---@param record Agentic.ui.terminal.Record
+---@param params table
+local function write_script(record, params)
+  local f = record.files
+  local lines = { "trap : INT" } -- Ctrl-C stops the command, not the report
+  lines[#lines + 1] = "printf '\\033[2m$ %s\\033[0m\\n' " .. shell_quote(record.command)
+  lines[#lines + 1] = "{ ("
+  if params.cwd and params.cwd ~= "" then
+    lines[#lines + 1] = "cd " .. shell_quote(params.cwd) .. " || exit"
+  end
+  for _, item in ipairs(type(params.env) == "table" and params.env or {}) do
+    if type(item) == "table" and type(item.name) == "string" and item.name:match("^[%a_][%w_]*$") then
+      lines[#lines + 1] = string.format("export %s=%s", item.name, shell_quote(tostring(item.value or "")))
+    end
+  end
+  lines[#lines + 1] = record.command
+  lines[#lines + 1] = string.format('); printf %%s "$?" > %s; } 2>&1 | tee %s', shell_quote(f.code), shell_quote(f.out))
+  lines[#lines + 1] = string.format("code=$(cat %s 2>/dev/null || echo 130)", shell_quote(f.code))
+  lines[#lines + 1] = string.format("printf '\\033]%s;end;%%s;%%s\\007' %s \"$code\"", OSC, shell_quote(record.id))
+  vim.fn.writefile(lines, f.script)
+end
+
+---@param params table
+---@return Agentic.ui.terminal.Record?
+---@return string? err
+local function handle_create(params)
+  local shell, err = idle_shell()
+  if not shell then
+    return nil, err
   end
 
-  record = {
-    job_id = job_id,
-    buf_id = buf,
+  local base = vim.fn.tempname()
+  local record = { ---@type Agentic.ui.terminal.Record
+    id = params.terminalId,
+    shell = shell,
+    command = params.command,
+    files = { script = base .. ".sh", out = base .. ".out", code = base .. ".code" },
     running = true,
     waiters = {},
+    output_limit = tonumber(params.outputByteLimit),
   }
-  terminals[term_id] = record
-  util.getState().terminals[term_id] = record
+  write_script(record, params)
 
-  return job_id
+  shell.current = record
+  shell.last = record.command
+  terminals[record.id] = record
+  util.getState().terminals[record.id] = record
+  -- Leading space: kept out of history by shells set to ignore such lines.
+  vim.fn.chansend(shell.job, " sh " .. shell_quote(record.files.script) .. "\n")
+  notice("$ " .. record.command)
+  return record
 end
 
 ---@param params table
 local function handle_get_output(params)
-  local record = get(params.terminalId)
+  local record = terminals[params.terminalId]
   if not record then
-    local response = { request = "get_output", params = { stdout = "", stderr = "" } }
-    api.terminal_response(params.requestId, response)
+    api.terminal_response(params.requestId, { request = "get_output", params = { stdout = "", stderr = "" } })
     return
   end
-  local response = {
+  local output, truncated = read_output(record)
+  api.terminal_response(params.requestId, {
     request = "get_output",
     params = {
-      stdout = read_output(record.buf_id),
+      stdout = output,
       stderr = "",
-      truncated = false,
-      exitStatus = record.running and nil or { exitCode = record.exit_code, signal = record.signal },
+      truncated = truncated,
+      exitStatus = not record.running and { exitCode = record.exit_code } or nil,
     },
-  }
-  api.terminal_response(params.requestId, response)
+  })
 end
 
 ---@param params table
 local function handle_wait_exit(params)
-  local record = get(params.terminalId)
-  if not record then
-    api.terminal_response(params.requestId, {
-      request = "wait_exit",
-      params = { exitStatus = { exitCode = -1, signal = 0 } },
-    })
-    return
-  end
-
+  local record = terminals[params.terminalId]
   local function reply()
     api.terminal_response(params.requestId, {
       request = "wait_exit",
-      params = { exitStatus = { exitCode = record.exit_code, signal = record.signal } },
+      params = { exitStatus = { exitCode = record and record.exit_code or -1 } },
     })
   end
-
-  if not record.running then
-    reply()
-  else
+  if record and record.running then
     table.insert(record.waiters, reply)
+  else
+    reply()
   end
 end
 
+--- Interrupts the command (Ctrl-C); the shell itself keeps running.
 ---@param params table
 local function handle_kill(params)
-  local record = get(params.terminalId)
-  if record and record.job_id then
-    pcall(vim.fn.jobstop, record.job_id)
+  local record = terminals[params.terminalId]
+  if record and record.running and record.shell.alive then
+    pcall(vim.fn.chansend, record.shell.job, "\3")
   end
-  api.terminal_response(params.requestId, {
-    request = "kill",
-    params = { success = record ~= nil },
-  })
+  api.terminal_response(params.requestId, { request = "kill", params = { success = record ~= nil } })
 end
 
+--- Forgets the command. Its shell stays open (and can be reused).
 ---@param params table
 local function handle_release(params)
-  local record = get(params.terminalId)
-  if record then
-    if record.buf_id and vim.api.nvim_buf_is_valid(record.buf_id) then
-      vim.api.nvim_buf_delete(record.buf_id, { force = true })
-    end
-    terminals[params.terminalId] = nil
-    util.getState().terminals[params.terminalId] = nil
-  end
-  api.terminal_response(params.requestId, {
-    request = "release",
-    params = { success = true },
-  })
+  terminals[params.terminalId] = nil
+  util.getState().terminals[params.terminalId] = nil
+  api.terminal_response(params.requestId, { request = "release", params = { success = true } })
 end
 
 ---@param data table
@@ -195,27 +321,20 @@ function M.handle(data)
   local params = data.params or {}
 
   if request == "create" then
-    local job_id, err = handle_create(params)
-    if not job_id then
-      local client = require("agentic.rpc.client").get()
-      if client.transport then
-        client.transport:send(vim.json.encode({
-          jsonrpc = "2.0",
-          data = {
-            method = "client/terminal",
-            params = {
-              requestId = params.requestId,
-              error = { message = err },
-              response = { request = "create", params = {} },
-            },
-          },
-        }))
-      end
+    local record, err = handle_create(params)
+    if not record then
+      local protocol = require("agentic.rpc.protocol")
+      require("agentic.rpc.client").get():notify(protocol.client_methods.TERMINAL, {
+        requestId = params.requestId,
+        error = { message = err },
+        response = { request = "create", params = {} },
+      })
+      notice("$ " .. tostring(params.command) .. " → " .. tostring(err), "error")
       return
     end
     api.terminal_response(params.requestId, {
       request = "create",
-      params = { terminalId = params.terminalId, jobId = job_id },
+      params = { terminalId = record.id, jobId = record.shell.job },
     })
   elseif request == "get_output" then
     handle_get_output(params)
@@ -225,6 +344,55 @@ function M.handle(data)
     handle_kill(params)
   elseif request == "release" then
     handle_release(params)
+  end
+end
+
+--- The agent shells that are still running.
+---@return Agentic.ui.terminal.Shell[]
+function M.shells()
+  return vim.tbl_filter(function(shell)
+    return shell.alive and vim.api.nvim_buf_is_valid(shell.buf)
+  end, shells)
+end
+
+--- Shows an agent shell and focuses it.
+---@param shell Agentic.ui.terminal.Shell
+function M.show(shell)
+  if shell.win then
+    shell.win:show():focus()
+    return
+  end
+  local win = vim.fn.bufwinid(shell.buf)
+  if win ~= -1 then
+    vim.api.nvim_set_current_win(win)
+    return
+  end
+  vim.cmd("botright split")
+  vim.api.nvim_win_set_buf(0, shell.buf)
+  vim.api.nvim_win_set_height(0, math.floor(vim.o.lines * 0.3))
+end
+
+---@param shell Agentic.ui.terminal.Shell
+---@return string
+function M.format(shell)
+  local what = shell.current and ("running: " .. shell.current.command)
+    or (shell.last and ("idle · last: " .. shell.last) or "idle")
+  return string.format("agent shell %d  %s", shell.n, what)
+end
+
+--- Opens the agent shell, or a picker when there are several.
+function M.pick()
+  local list = M.shells()
+  if #list == 0 then
+    util.notify("The agent hasn't opened a terminal yet", vim.log.levels.WARN)
+  elseif #list == 1 then
+    M.show(list[1])
+  else
+    util.select(list, { prompt = "Agent terminals", format_item = M.format }, function(shell)
+      if shell then
+        M.show(shell)
+      end
+    end)
   end
 end
 

@@ -73,6 +73,18 @@ function M.setup()
     end,
   })
 
+  -- Keep the fallback winbars current (running state, stop button). A no-op
+  -- when lualine draws the bars; it refreshes itself on state changes.
+  vim.api.nvim_create_autocmd("User", {
+    group = group,
+    pattern = "AgenticStateChanged",
+    callback = function()
+      local statusline = require("agentic.ui.statusline")
+      statusline.refresh("main")
+      statusline.refresh("chat")
+    end,
+  })
+
   -- Cleanly stop the server on exit, so the session is marked suspended
   -- rather than left active in the server's DB.
   vim.api.nvim_create_autocmd("VimLeavePre", {

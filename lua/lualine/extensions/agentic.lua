@@ -5,7 +5,9 @@ local M = {}
 
 M.sections = {
   lualine_a = { { "agentic", item = "title" } },
-  lualine_b = { { "agentic", item = "provider" } },
+  -- Sections c–y are truncated first in a narrow (sidebar) statusline, so the
+  -- stop button goes in `b`, ahead of lualine's truncation point.
+  lualine_b = { { "agentic", item = "cancel", color = "DiagnosticError" }, { "agentic", item = "provider" } },
   lualine_c = { { "agentic", item = "model" }, { "agentic", item = "mode" } },
   lualine_x = { { "agentic", item = "context" } },
   lualine_y = { { "agentic", item = "status" } },
@@ -36,6 +38,7 @@ M.winbar = {
     { "agentic", item = "mode", cond = is_prompt },
   },
   lualine_x = {
+    { "agentic", item = "cancel", color = "DiagnosticError" },
     { "agentic", item = "context", cond = is_prompt },
     { "agentic", item = "status", cond = is_transcript },
   },
