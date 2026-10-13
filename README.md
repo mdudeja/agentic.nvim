@@ -142,6 +142,21 @@ This uses the `agentCapabilities` the server reports on `client/init`; with an
 older server every action is offered and refusals are reported. Without snacks,
 `vim.ui.select` picks the session and then the action.
 
+### Reviewing agent edits
+
+Each file an agent edits gets a line under its tool call in the transcript,
+with exact `+added/-removed` counts (and `(new file)` / `(deleted)`). When the
+agent asks permission for an edit, the proposed diff opens above the
+Allow/Reject picker and closes when you answer. Approval covers the whole tool
+call; ACP has no per-hunk accept.
+
+`:AgenticDiff` shows the latest edit; `:AgenticDiffs` picks from every edit this
+session (newest first, with a preview). Rejected or failed edits are dropped;
+switching sessions clears the list. Each change is diffed from what the agent
+sent (`oldText` → `newText`), which works whether the agent sends a snippet
+(Claude, opencode), per-hunk patches (Codex) or whole files (Gemini); line
+numbers are matched against the file when the text can be found.
+
 ### Commands
 
 | Command | Purpose |
@@ -158,7 +173,7 @@ older server every action is offered and refusals are reported. Without snacks,
 | `:AgenticSummarize` | Summarise the active session |
 | `:AgenticExport [path]` / `:AgenticImport <file>` | Export/import sessions |
 | `:AgenticContexts` / `:AgenticClearContexts` | Inspect/clear staged context |
-| `:AgenticDiff` | Review the last tool-call diff |
+| `:AgenticDiff` / `:AgenticDiffs` (`:AgenticDiff!`) | Review the latest agent edit / pick from all edits this session |
 | `:AgenticLog` | Open the server log buffer |
 | `:AgenticDispose` | Shut the server down |
 

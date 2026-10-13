@@ -6,7 +6,7 @@
 ---@class Agentic.ui.render
 local M = {}
 
----@type table<integer, { role: string?, tool_lines: table<string, integer>, tool_counts: table<string, integer> }>
+---@type table<integer, { role: string?, tool_lines: table<string, integer>, tool_counts: table<string, integer>, tool_titles: table<string, string>? }>
 local buffers = {}
 
 local headers = {
@@ -143,45 +143,51 @@ end
 function M.tool_call(bufnr, update)
   local st = ensure(bufnr)
   local id = update.toolCallId or update.tool_call_id
-  local title = update.title or (update.kind or "tool")
+  st.tool_titles = st.tool_titles or {}
+  -- Status-only updates usually omit the title; keep the one first seen.
+  local title = (update.title ~= nil and update.title ~= vim.NIL) and update.title
+    or (id and st.tool_titles[id])
+    or update.kind
+    or "tool"
+  if id then
+    st.tool_titles[id] = title
+  end
   local status = update.status or "pending"
   local icon = status == "completed" and "✔" or (status == "failed" and "✖" or "⚙")
   local line = string.format("%s %s [%s]", icon, title, status)
 
+  -- Record diffs first: they may arrive in the initial call or any update.
+  local touched = require("agentic.ui.diff").record(update)
+
   if id and st.tool_lines[id] then
     vim.api.nvim_buf_set_lines(bufnr, st.tool_lines[id], st.tool_lines[id] + 1, false, { line })
-    return
+  else
+    st.role = nil -- break the current stream so the tool row stands alone
+    append_lines(bufnr, { "", line }, hl.tool)
+    if id then
+      st.tool_lines[id] = vim.api.nvim_buf_line_count(bufnr) - 1
+    end
   end
 
-  st.role = nil -- break the current stream so the tool row stands alone
-  append_lines(bufnr, { "", line }, hl.tool)
-  if id then
-    st.tool_lines[id] = vim.api.nvim_buf_line_count(bufnr) - 1
-  end
-
-  -- Summarise any diff content for quick inspection.
-  for _, item in ipairs(update.content or {}) do
-    if item.type == "diff" then
-      require("agentic.ui.diff").record(update)
-      local path = item.path or (item._meta and item._meta.path) or "file"
-      local added, removed = 0, 0
-      for _, l in ipairs(vim.split(item.newText or "", "\n", { plain = true })) do
-        if l ~= "" then
-          added = added + 1
-        end
-      end
-      for _, l in ipairs(vim.split(item.oldText or "", "\n", { plain = true })) do
-        if l ~= "" then
-          removed = removed + 1
-        end
-      end
-      local st2 = ensure(bufnr)
-      if not st2.tool_counts[id or title] then
-        st2.tool_counts[id or title] = 0
-        append_lines(bufnr, {
-          string.format("   ↳ %s (+%d/-%d) — :AgenticDiff to review", path, added, removed),
-        }, hl.meta)
-      end
+  -- One summary line per file the tool call changes, updated in place as
+  -- more hunks arrive. Counts come from the real diff.
+  for _, t in ipairs(touched) do
+    local suffix = t.kind == "add" and " (new file)" or (t.kind == "delete" and " (deleted)" or "")
+    local summary = string.format(
+      "   ↳ %s%s (+%d/-%d) — :AgenticDiff to review",
+      vim.fn.fnamemodify(t.path, ":."),
+      suffix,
+      t.added,
+      t.removed
+    )
+    local key = tostring(id or title) .. "\0" .. t.path
+    local at = st.tool_counts[key]
+    if at then
+      vim.api.nvim_buf_set_lines(bufnr, at, at + 1, false, { summary })
+    else
+      st.role = nil
+      append_lines(bufnr, { summary }, hl.meta)
+      st.tool_counts[key] = vim.api.nvim_buf_line_count(bufnr) - 1
     end
   end
 end

@@ -272,9 +272,17 @@ function M.setup()
     end)
   end, { desc = "Agentic: Dispose the server" })
 
-  vim.api.nvim_create_user_command("AgenticDiff", function()
-    require("agentic.ui.diff").open_last()
-  end, { desc = "Agentic: Review last tool-call diff" })
+  vim.api.nvim_create_user_command("AgenticDiff", function(opts)
+    if opts.bang then
+      require("agentic.ui.diff").pick()
+    else
+      require("agentic.ui.diff").open_last()
+    end
+  end, { bang = true, desc = "Agentic: Review the latest agent diff (! to pick from all)" })
+
+  vim.api.nvim_create_user_command("AgenticDiffs", function()
+    require("agentic.ui.diff").pick()
+  end, { desc = "Agentic: Pick from all agent diffs this session" })
 end
 
 return M

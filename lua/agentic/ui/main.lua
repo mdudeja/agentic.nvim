@@ -251,6 +251,7 @@ function M:reset_transcript(header)
   if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
+  require("agentic.ui.diff").clear()
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "# " .. header })
   local render = require("agentic.ui.render")
   render.reset(bufnr)

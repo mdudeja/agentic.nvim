@@ -35,6 +35,21 @@ function M.handle(data)
     require("agentic.ui.render").notice(main, "Q: " .. question, "warn")
   end
 
+  -- A permission request for an edit: show the proposed diff while asking.
+  -- The server ids these `permission_<toolCallId>`; option descriptions carry
+  -- the ACP option kind (`allow_once`, `reject_always`, …).
+  local tool_call_id = question_id and question_id:match("^permission_(.+)$")
+  local diff = require("agentic.ui.diff")
+  local preview = tool_call_id and diff.show_tool_call(tool_call_id, { focus = false })
+  local function settle(kind)
+    if preview and vim.api.nvim_win_is_valid(preview) then
+      pcall(vim.api.nvim_win_close, preview, true)
+    end
+    if tool_call_id then
+      diff.resolve(tool_call_id, kind)
+    end
+  end
+
   if options and #options > 0 then
     util.select(options, {
       prompt = question,
@@ -45,6 +60,7 @@ function M.handle(data)
         return opt.label or opt.id
       end,
     }, function(choice)
+      settle(choice and choice.description or nil)
       if not choice then
         respond(question_id, "cancel")
         return
@@ -55,6 +71,8 @@ function M.handle(data)
   end
 
   util.input({ prompt = question }, function(value)
+    -- Free text can't be classified here; the tool call's final status decides.
+    settle(value and value ~= "" and "answered" or nil)
     respond(question_id, value or "")
   end)
 end
