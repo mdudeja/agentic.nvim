@@ -126,6 +126,11 @@ with the selection attached, ready for your question.
 | `?` | n | show all composer keys (which-key, or a small float) |
 | `q` | n | close the UI |
 
+In the transcript, `gf` or `<CR>` opens the file under the cursor (e.g. a
+`󰈙 path` line the agent sent) in your editor window, and `gx` opens web links.
+The transcript and composer windows are `winfixbuf`, so other buffers can't
+replace them.
+
 Rebind or disable (`false`) any of these via `composer_keys`. Globally:
 `<leader>am` model, `<leader>ao` mode, `<leader>as` sessions, `<leader>ap`
 provider, `<leader>an` new session, `<leader>ax` cancel the running turn.

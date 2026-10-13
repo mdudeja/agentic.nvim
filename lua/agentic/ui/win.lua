@@ -192,6 +192,9 @@ function M:create_win(bufnr, enter, opts)
     end
     local win = vim.api.nvim_open_win(bufnr, enter or false, win_opts)
     self:_apply_padding(win)
+    -- Commands like `gf`, `:e` or a picker must not swap another buffer into
+    -- an agentic window (it breaks the layout, e.g. under edgy).
+    vim.wo[win].winfixbuf = true
     return win
   end
 
@@ -230,6 +233,9 @@ function M:create_win(bufnr, enter, opts)
       vim.cmd("wincmd p")
     end
     self:_apply_padding(win)
+    -- Commands like `gf`, `:e` or a picker must not swap another buffer into
+    -- an agentic window (it breaks the layout, e.g. under edgy).
+    vim.wo[win].winfixbuf = true
     return win
   end
 

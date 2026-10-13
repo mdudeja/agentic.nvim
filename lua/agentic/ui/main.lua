@@ -72,6 +72,13 @@ function M.new(opts)
     end
   end
 
+  if not vim.b[bufnr].agentic_keys then
+    vim.b[bufnr].agentic_keys = true
+    for _, lhs in ipairs({ "gf", "<CR>" }) do
+      vim.keymap.set("n", lhs, M.open_under_cursor, { buffer = bufnr, desc = "Agentic: Open file/link under cursor" })
+    end
+  end
+
   require("agentic.ui.render").setup_highlights()
   require("agentic.ui.statusline").setup_highlights()
 
@@ -80,6 +87,29 @@ function M.new(opts)
   self:_render_welcome()
 
   return self
+end
+
+--- Opens the file (or URL) under the cursor in the editor window, never in
+--- the transcript. Understands the `󰈙 <path>` lines of resources.
+function M.open_under_cursor()
+  local line = vim.api.nvim_get_current_line()
+  local target = line:match("^󰈙 (.-) %(binary") or line:match("^󰈙 (.-)  ") or line:match("^󰈙 (.+)$")
+  target = target or vim.fn.expand("<cfile>")
+  if target == "" then
+    return
+  end
+  if target:match("^%a[%w+.-]*://") and not target:match("^file://") then
+    vim.ui.open(target)
+    return
+  end
+  local path = target:match("^file://") and vim.uri_to_fname(target) or vim.fn.expand(target)
+  path = vim.fn.fnamemodify(path, ":p")
+  if vim.fn.filereadable(path) == 0 then
+    util.notify("No such file: " .. target, vim.log.levels.WARN)
+    return
+  end
+  vim.api.nvim_set_current_win(util.editor_window())
+  vim.cmd.edit(vim.fn.fnameescape(path))
 end
 
 --- Starts the server and initialises the configured provider (once).
