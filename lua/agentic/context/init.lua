@@ -138,21 +138,104 @@ function M.add_text(text, type, label)
   stage({ type = type or "text", text = text, label = label })
 end
 
---- Stages a file (content as text) context.
+--- Builds a file context (content as a fenced block), or nil if unreadable.
 ---@param path string
-function M.add_file(path)
+---@return table?
+function M.file_context(path)
   local content = read_file(path)
   if not content then
-    util.notify("Could not read " .. path, vim.log.levels.WARN)
-    return
+    return nil
   end
   local ft = vim.filetype.match({ filename = path }) or ""
-  stage({
+  return {
     type = "file",
     text = string.format("```%s\n%s\n```", ft, content),
     label = relative(path),
     metadata = { name = relative(path) },
-  })
+  }
+end
+
+--- Builds a selection context for a line range of `path`.
+---@param path string
+---@param content string
+---@param start_line? number
+---@param end_line? number
+---@return table
+function M.selection_context(path, content, start_line, end_line)
+  local ft = vim.filetype.match({ filename = path or "" }) or ""
+  local name = path and path ~= "" and relative(path) or "selection"
+  local label = name
+  if start_line and end_line then
+    label = string.format("%s:%d-%d", name, start_line, end_line)
+  end
+  return {
+    type = "selection",
+    text = string.format("```%s\n%s\n```", ft, content),
+    label = label,
+    metadata = {
+      name = path and path ~= "" and relative(path) or nil,
+      start = start_line,
+      ["end"] = end_line,
+    },
+  }
+end
+
+--- Builds a file context from a buffer's current (possibly unsaved) lines.
+---@param buf integer
+---@return table
+function M.buffer_context(buf)
+  local name = vim.api.nvim_buf_get_name(buf)
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  return {
+    type = "file",
+    text = string.format("```%s\n%s\n```", vim.bo[buf].filetype, table.concat(lines, "\n")),
+    label = relative(name),
+    metadata = { name = relative(name) },
+  }
+end
+
+--- The implicit "current" context: the selection the UI was opened with, else
+--- the file buffer the user was last in. Nil when disabled, skipped for this
+--- prompt, or there is no such buffer. With `describe`, no text is built (for
+--- chips); the label is the same either way.
+---@param describe? boolean
+---@return table?
+function M.auto_context(describe)
+  local st = state()
+  if not require("agentic.config").options.auto_context then
+    return nil
+  end
+  local buf = st.current_buffer
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then
+    return nil
+  end
+  local name = vim.api.nvim_buf_get_name(buf)
+  if name == "" then
+    return nil
+  end
+
+  local ctx
+  local sel = st.current_selection
+  if sel and sel.buf == buf then
+    ctx = M.selection_context(name, describe and "" or sel.text, sel.start[1], sel.finish[1])
+  elseif describe then
+    ctx = { type = "file", label = relative(name), metadata = { name = relative(name) } }
+  else
+    ctx = M.buffer_context(buf)
+  end
+  ctx.auto = true
+  return ctx
+end
+
+--- Stages a file (content as text) context.
+---@param path string
+function M.add_file(path)
+  local ctx = M.file_context(path)
+  if not ctx then
+    util.notify("Could not read " .. path, vim.log.levels.WARN)
+    return
+  end
+  stage(ctx)
 end
 
 --- Stages a selection (content as text) context.
@@ -161,22 +244,53 @@ end
 ---@param start_line? number
 ---@param end_line? number
 function M.add_selection(path, content, start_line, end_line)
-  local ft = vim.filetype.match({ filename = path or "" }) or ""
-  local name = path and path ~= "" and relative(path) or "selection"
-  local label = name
-  if start_line and end_line then
-    label = string.format("%s:%d-%d", name, start_line, end_line)
+  stage(M.selection_context(path, content, start_line, end_line))
+end
+
+local kind_icons = {
+  file = "󰈙",
+  selection = "󰒉",
+  diagnostics = "",
+  workspace = "󰙅",
+  keymaps = "󰌌",
+  image = "󰋩",
+  link = "󰌹",
+  text = "󰦨",
+}
+
+--- Icon for a context: the file's devicon when available, else a kind icon.
+---@param ctx table
+---@return string icon
+---@return string? hl devicon highlight group
+function M.icon(ctx)
+  local name = ctx.metadata and ctx.metadata.name
+  if (ctx.type == "file" or ctx.type == "selection") and name then
+    local ok, devicons = pcall(require, "nvim-web-devicons")
+    if ok then
+      local icon, hl = devicons.get_icon(vim.fn.fnamemodify(name, ":t"), vim.fn.fnamemodify(name, ":e"))
+      if icon then
+        return icon, hl
+      end
+    end
   end
-  stage({
-    type = "selection",
-    text = string.format("```%s\n%s\n```", ft, content),
-    label = label,
-    metadata = {
-      name = path and vim.fn.fnamemodify(path, ":t") or nil,
-      start = start_line,
-      ["end"] = end_line,
-    },
-  })
+  return kind_icons[ctx.type or "text"] or kind_icons.text, nil
+end
+
+--- Short human label for a staged context: the file name (with its line range
+--- for selections), or the context's own label for other kinds.
+---@param ctx table
+---@return string
+function M.label(ctx)
+  local meta = ctx.metadata or {}
+  if (ctx.type == "file" or ctx.type == "selection") and meta.name then
+    local label = vim.fn.fnamemodify(meta.name, ":t")
+    if meta.start and meta["end"] then
+      label = meta.start == meta["end"] and string.format("%s:%d", label, meta.start)
+        or string.format("%s:%d-%d", label, meta.start, meta["end"])
+    end
+    return label
+  end
+  return ctx.label or meta.name or ctx.type or "context"
 end
 
 -- ---------------------------------------------------------------------------
@@ -381,7 +495,8 @@ function M.pick_diagnostics()
   })
 end
 
-function M.insert_keymaps()
+---@return table
+function M.keymaps_context()
   local maps = vim.api.nvim_get_keymap("n")
   local lines = {}
   for _, map in ipairs(maps) do
@@ -389,31 +504,51 @@ function M.insert_keymaps()
       lines[#lines + 1] = string.format("- `%s`: %s", map.lhs, map.desc)
     end
   end
-  stage({ type = "keymaps", label = string.format("%d keymap(s)", #lines), text = table.concat(lines, "\n") })
+  return { type = "keymaps", label = string.format("%d keymaps", #lines), text = table.concat(lines, "\n") }
+end
+
+function M.insert_keymaps()
+  stage(M.keymaps_context())
   focus_composer()
 end
 
---- Cached workspace outline built from file listing + tree-sitter symbols.
+--- Workspace outline built from the file listing (cached unless `refresh`).
+---@param refresh? boolean
+---@return table
+function M.workspace_context(refresh)
+  local st = state()
+  if refresh or not st.workspace_tree_cache then
+    local out = {}
+    for _, path in ipairs(require("agentic.fs").list_files()) do
+      out[#out + 1] = "- " .. path
+    end
+    st.update("workspace_tree_cache", table.concat(out, "\n"))
+  end
+  local text = st.workspace_tree_cache
+  local _, count = text:gsub("\n", "")
+  return { type = "workspace", label = string.format("workspace (%d files)", count + 1), text = text }
+end
+
 ---@param refresh? boolean
 function M.insert_workspace(refresh)
-  local st = state()
-  if not refresh and st.workspace_tree_cache then
-    stage({ type = "workspace", label = "workspace outline (cached)", text = st.workspace_tree_cache })
-    focus_composer()
-    return
-  end
-
-  util.notify("Building workspace outline…")
-  local files = require("agentic.fs").list_files()
-
-  local out = {}
-  for _, path in ipairs(files) do
-    out[#out + 1] = "- " .. path
-  end
-  local outline = table.concat(out, "\n")
-  st.update("workspace_tree_cache", outline)
-  stage({ type = "workspace", label = string.format("workspace outline (%d files)", #files), text = outline })
+  stage(M.workspace_context(refresh))
   focus_composer()
+end
+
+--- All current diagnostics across loaded buffers, or nil when there are none.
+---@return table?
+function M.diagnostics_context()
+  local severity = { "ERROR", "WARN", "INFO", "HINT" }
+  local parts = {}
+  for _, d in ipairs(vim.diagnostic.get()) do
+    local name = vim.api.nvim_buf_is_valid(d.bufnr) and vim.api.nvim_buf_get_name(d.bufnr) or ""
+    parts[#parts + 1] =
+      string.format("%s:%d [%s] %s", relative(name), d.lnum + 1, severity[d.severity] or "diag", d.message)
+  end
+  if #parts == 0 then
+    return nil
+  end
+  return { type = "diagnostics", label = string.format("%d diagnostics", #parts), text = table.concat(parts, "\n") }
 end
 
 --- Stages an image file (base64 inline, or uri resource for the server to read).
@@ -471,32 +606,14 @@ end
 -- Prompt shortcuts
 -- ---------------------------------------------------------------------------
 
---- Ask about the current visual selection from anywhere (outside the composer).
+--- Opens the composer with the current visual selection attached (as the
+--- "current" context), ready for the question to be typed.
 function M.global_visual_prompt()
-  -- The selection is captured live by the selection tracker (see autocmds);
-  -- grab it now, before leaving visual mode.
-  local captured = require("agentic.selection").last()
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
-
-  if not captured or not vim.api.nvim_buf_is_valid(captured.buf) then
+  if not require("agentic.selection").kind(vim.fn.mode()) then
     util.notify("No visual selection found", vim.log.levels.WARN)
     return
   end
-
-  local name = vim.api.nvim_buf_get_name(captured.buf)
-  vim.schedule(function()
-    require("agentic.ui.main").get():show()
-    M.add_selection(name, captured.text, captured.start[1], captured.finish[1])
-    util.input({ prompt = "Ask about selection: " }, function(input)
-      if not input or input == "" then
-        return
-      end
-      local st = state()
-      local content = table.concat(vim.api.nvim_buf_get_lines(st.chat_buffer, 0, -1, false), "\n")
-      vim.api.nvim_buf_set_lines(st.chat_buffer, 0, -1, false, vim.split(content .. input, "\n", { plain = true }))
-      require("agentic.ui.chat").get():submit()
-    end)
-  end)
+  require("agentic.ui.main").get():show()
 end
 
 return M

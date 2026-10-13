@@ -33,6 +33,8 @@
 ---@field server Agentic.config.server?
 ---@field win Agentic.config.win?
 ---@field views table<string, Agentic.config.win>?
+---@field auto_context boolean?
+---@field composer_keys table<string, string|string[]|false>?
 ---@field keys table<string, { action: string|fun(self: Agentic.ui.main), desc: string, mode: string|string[] }>?
 local M = {}
 
@@ -67,44 +69,54 @@ local defaults = {
     style = "minimal",
   },
 
+  -- Default layout: a right-hand sidebar (transcript above, composer below).
+  -- These are plain splits, so edgy.nvim can manage them when installed. Set
+  -- `relative = "editor"` (plus `position`/`border`/`title`) for floats.
   views = {
     main = {
       ft = "agentic",
       fixbuf = true,
-      -- Floating windows with a real border: the border gives clear visual
-      -- separation and works even when another plugin claims the winbar.
-      relative = "editor",
-      position = "topright",
-      border = "rounded",
-      title = " Agentic ",
+      split = "right",
       enter = true,
       resize = true,
       stack = true,
       padding = 1,
       size = {
-        width = 0.3,
-        -- Leave room beneath for the composer.
-        height = 0.72,
+        width = 0.33,
       },
     },
     chat = {
       ft = "agentic_input",
       fixbuf = true,
-      relative = "editor",
-      -- Anchored to main: same column and width, docked directly beneath it.
+      -- Split from the transcript window so it shares its column.
       anchor = "main",
-      position = "below",
-      border = "rounded",
-      title = " Prompt ",
+      split = "below",
       enter = true,
       resize = true,
       stack = true,
       padding = 1,
       size = {
-        width = 0.3,
-        height = 0.22,
+        height = 0.2,
       },
     },
+  },
+
+  -- Attach the file you were last editing (or the selection you opened the UI
+  -- with) to every prompt, shown as a "(current)" chip. `<C-x>` in the
+  -- composer skips it for one prompt.
+  auto_context = true,
+
+  -- Composer (prompt buffer) keys. Set any entry to `false` to disable it.
+  composer_keys = {
+    submit = { "<CR>", "<C-s>" }, -- normal + insert
+    cycle_mode = "<S-Tab>", -- normal + insert (defers to the completion menu)
+    pick_model = "<C-o>", -- normal + insert
+    pick_mode = "<M-m>", -- normal + insert
+    sessions = "<M-s>", -- normal + insert: sessions view
+    toggle_auto_context = "<C-x>", -- normal + insert: skip/restore the current file for one prompt
+    clear_contexts = "<C-c>", -- normal
+    help = "?", -- normal
+    close = "q", -- normal
   },
 
   keys = {

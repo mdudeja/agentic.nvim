@@ -56,6 +56,9 @@ function M.init(provider, cb)
   client():request(protocol.INIT, { provider = provider, cwd = root }, function(result, rpc_err)
     finalize(result, rpc_err, cb, function(res)
       update("agent_id", res.agentId)
+      -- Replace, never merge: a new provider's capabilities stand alone.
+      state.get().agent_capabilities = res.agentCapabilities
+      state.changed()
     end)
   end)
 end
@@ -74,6 +77,9 @@ function M.switch_provider(provider, cb)
       if res.agentId then
         update("agent_id", res.agentId)
       end
+      -- Replace, never merge: a new provider's capabilities stand alone.
+      state.get().agent_capabilities = res.agentCapabilities
+      state.changed()
       -- The session list is scoped to the provider; reset the active session.
       update("session_id", nil)
       update("session_name", nil)

@@ -12,20 +12,7 @@ local function notify(msg, level)
   util.notify(msg, level)
 end
 
----@param result table?
----@param err table?
----@return boolean
-local function ok(result, err)
-  if err then
-    notify(tostring(err.message), vim.log.levels.ERROR)
-    return false
-  end
-  if result and result.success == false then
-    notify(tostring(result.error or "request failed"), vim.log.levels.ERROR)
-    return false
-  end
-  return true
-end
+local ok = util.ok
 
 function M.setup()
   vim.api.nvim_create_user_command("AgenticToggle", function()
@@ -80,35 +67,8 @@ function M.setup()
   end, { nargs = "?", desc = "Agentic: New session" })
 
   vim.api.nvim_create_user_command("AgenticSessions", function()
-    api.list_sessions(nil, function(result, err)
-      if not ok(result, err) then
-        return
-      end
-      local sessions = (result and result.sessions) or {}
-      if #sessions == 0 then
-        notify("No sessions found", vim.log.levels.WARN)
-        return
-      end
-      util.select(sessions, {
-        prompt = "Resume session",
-        format_item = function(s)
-          local name = s.name or s.sessionName or s.title or s.sessionId or s.id or "session"
-          return string.format("%s (%s)", name, s.sessionId or s.id or "?")
-        end,
-      }, function(choice)
-        if not choice then
-          return
-        end
-        local id = choice.sessionId or choice.id
-        api.resume_session(id, function(res, res_err)
-          if ok(res, res_err) then
-            notify("Resumed " .. tostring(id))
-            require("agentic.ui.main").get():_sync_config_options()
-          end
-        end)
-      end)
-    end)
-  end, { desc = "Agentic: List/resume sessions" })
+    require("agentic.ui.sessions").open()
+  end, { desc = "Agentic: Sessions (switch, rename, fork, archive, delete, …)" })
 
   vim.api.nvim_create_user_command("AgenticRenameSession", function(opts)
     local state = util.getState()
@@ -155,84 +115,22 @@ function M.setup()
   end, { desc = "Agentic: Delete active session" })
 
   vim.api.nvim_create_user_command("AgenticModel", function()
-    local state = util.getState()
-    if not state.session_id then
-      notify("No active session", vim.log.levels.WARN)
-      return
-    end
-    api.list_config_options(state.session_id, function(result, err)
-      if not ok(result, err) then
-        return
-      end
-      local options = (result and result.configOptions) or {}
-      local model_opt
-      for _, opt in ipairs(options) do
-        if opt.category == "model" or opt.id == "model" then
-          model_opt = opt
-          break
-        end
-      end
-      if not model_opt or not model_opt.options then
-        notify("No model options available", vim.log.levels.WARN)
-        return
-      end
-      util.select(model_opt.options, {
-        prompt = "Select model",
-        format_item = function(o)
-          return o.name or o.value
-        end,
-      }, function(choice)
-        if not choice then
-          return
-        end
-        api.set_config_option(model_opt.id, choice.value, state.session_id, function(r, e)
-          if ok(r, e) then
-            notify("Model set to " .. tostring(choice.value))
-          end
-        end)
-      end)
-    end)
+    require("agentic.ui.settings").pick_model()
   end, { desc = "Agentic: Switch model" })
 
-  vim.api.nvim_create_user_command("AgenticMode", function()
-    local state = util.getState()
-    if not state.session_id then
-      notify("No active session", vim.log.levels.WARN)
-      return
+  vim.api.nvim_create_user_command("AgenticMode", function(opts)
+    if opts.args == "next" then
+      require("agentic.ui.settings").cycle_mode()
+    else
+      require("agentic.ui.settings").pick_mode()
     end
-    api.list_config_options(state.session_id, function(result, err)
-      if not ok(result, err) then
-        return
-      end
-      local options = (result and result.configOptions) or {}
-      local mode_opt
-      for _, opt in ipairs(options) do
-        if opt.category == "mode" or opt.id == "mode" then
-          mode_opt = opt
-          break
-        end
-      end
-      if not mode_opt or not mode_opt.options then
-        notify("No mode options available", vim.log.levels.WARN)
-        return
-      end
-      util.select(mode_opt.options, {
-        prompt = "Select mode",
-        format_item = function(o)
-          return o.name or o.value
-        end,
-      }, function(choice)
-        if not choice then
-          return
-        end
-        api.set_config_option(mode_opt.id, choice.value, state.session_id, function(r, e)
-          if ok(r, e) then
-            notify("Mode set to " .. tostring(choice.value))
-          end
-        end)
-      end)
-    end)
-  end, { desc = "Agentic: Switch mode" })
+  end, {
+    nargs = "?",
+    desc = "Agentic: Switch mode (`next` cycles)",
+    complete = function()
+      return { "next" }
+    end,
+  })
 
   vim.api.nvim_create_user_command("AgenticStats", function(opts)
     local days = tonumber(opts.args) or 7

@@ -60,12 +60,17 @@ function M.new(opts)
             vim.wo[winnr].number = false
             vim.wo[winnr].relativenumber = false
             vim.wo[winnr].cursorline = false
+            vim.wo[winnr].statuscolumn = ""
+            vim.wo[winnr].spell = false
+            vim.wo[winnr].list = false
+            vim.wo[winnr].winfixheight = true
             require("agentic.ui.statusline").refresh("chat")
         end
     end
 
     self:_bind_keys(bufnr)
     require("agentic.keymaps").attach(bufnr)
+    self:_watch(bufnr)
     self:_refresh_chip()
 
     if vim.api.nvim_get_current_buf() ~= bufnr then
@@ -76,31 +81,133 @@ function M.new(opts)
     return self
 end
 
+---@param keys string|string[]|false|nil
+---@return string[]
+local function key_list(keys)
+    if not keys then
+        return {}
+    end
+    return type(keys) == "table" and keys or { keys }
+end
+
 ---@param bufnr integer
 function M:_bind_keys(bufnr)
     local opts = { buffer = bufnr, silent = true, nowait = true }
+    local keys = require("agentic.config").options.composer_keys or {}
+    local settings = require("agentic.ui.settings")
 
-    vim.keymap.set({ "n", "i" }, "<CR>", function()
+    ---@param modes string|string[]
+    ---@param lhs string|string[]|false|nil
+    ---@param fn function
+    ---@param desc string
+    local function bind(modes, lhs, fn, desc)
+        for _, key in ipairs(key_list(lhs)) do
+            vim.keymap.set(modes, key, fn, vim.tbl_extend("force", opts, { desc = desc }))
+        end
+    end
+
+    bind({ "n", "i" }, keys.submit, function()
+        -- With the completion menu open, <CR> picks the item (e.g. an `@`
+        -- mention) instead of sending the prompt.
+        local ok, blink = pcall(require, "blink.cmp")
+        if ok and blink.is_menu_visible() then
+            blink.select_and_accept()
+            return
+        end
         M.get():submit()
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Send prompt" }))
+    end, "Send prompt")
 
-    vim.keymap.set({ "n", "i" }, "<C-s>", function()
-        M.get():submit()
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Send prompt" }))
+    bind({ "n", "i" }, keys.toggle_auto_context, function()
+        local state = util.getState()
+        state.update("auto_context_skip", not state.auto_context_skip)
+        M.get():_refresh_chip()
+    end, "Toggle current file/selection for this prompt")
 
-    vim.keymap.set("n", "<C-c>", function()
+    bind({ "n", "i" }, keys.cycle_mode, function()
+        -- Let an open completion menu keep <S-Tab> for selecting the previous item.
+        local ok, blink = pcall(require, "blink.cmp")
+        if ok and blink.is_menu_visible() then
+            blink.select_prev()
+            return
+        end
+        settings.cycle_mode()
+    end, "Cycle mode")
+
+    bind({ "n", "i" }, keys.pick_model, settings.pick_model, "Pick model")
+    bind({ "n", "i" }, keys.pick_mode, settings.pick_mode, "Pick mode")
+    bind({ "n", "i" }, keys.sessions, function()
+        require("agentic.ui.sessions").open()
+    end, "Sessions")
+
+    bind("n", keys.clear_contexts, function()
         util.getState().clear_contexts()
         M.get():_refresh_chip()
         util.notify("Contexts cleared")
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Clear staged contexts" }))
+    end, "Clear staged contexts")
 
-    vim.keymap.set("n", "q", function()
+    bind("n", keys.close, function()
         require("agentic.ui.main").get():hide()
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Close UI" }))
+    end, "Close Agentic")
+
+    bind("n", keys.help, function()
+        M.get():help()
+    end, "Show composer keys")
 
     vim.keymap.set("n", "i", function()
         vim.cmd("startinsert!")
-    end, vim.tbl_extend("force", opts, { desc = "Agentic: Insert" }))
+    end, vim.tbl_extend("force", opts, { desc = "Insert" }))
+end
+
+--- Shows the composer's buffer-local keys: which-key when available, else a
+--- small float.
+function M:help()
+    local ok, wk = pcall(require, "which-key")
+    if ok and wk.show then
+        wk.show({ global = false })
+        return
+    end
+    local lines = {}
+    for _, map in ipairs(vim.api.nvim_buf_get_keymap(0, "n")) do
+        if map.desc then
+            lines[#lines + 1] = string.format(" %-8s %s ", vim.fn.keytrans(map.lhs), map.desc)
+        end
+    end
+    table.sort(lines)
+    lines[#lines + 1] = " insert: @ to mention files, buffers, selection, diagnostics… "
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    local width = 0
+    for _, l in ipairs(lines) do
+        width = math.max(width, vim.fn.strdisplaywidth(l))
+    end
+    local win = vim.api.nvim_open_win(buf, true, {
+        relative = "cursor",
+        row = 1,
+        col = 0,
+        width = width,
+        height = #lines,
+        style = "minimal",
+        border = "rounded",
+        title = " Composer keys ",
+    })
+    for _, key in ipairs({ "q", "<Esc>", "?" }) do
+        vim.keymap.set("n", key, function()
+            pcall(vim.api.nvim_win_close, win, true)
+        end, { buffer = buf, nowait = true })
+    end
+end
+
+--- Re-renders decorations whenever the prompt text changes.
+---@param bufnr integer
+function M:_watch(bufnr)
+    local group = vim.api.nvim_create_augroup("AgenticComposer" .. bufnr, { clear = true })
+    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "BufEnter" }, {
+        group = group,
+        buffer = bufnr,
+        callback = function()
+            M.get():_refresh_chip()
+        end,
+    })
 end
 
 --- Reads the composer text as a single string.
@@ -121,45 +228,114 @@ function M:_clear()
     end
 end
 
---- Renders the staged contexts as virtual lines *above* the input. Using
---- `virt_lines` (rather than `virt_text` on the cursor line) keeps them on their
---- own screen rows so they never overlap what is being typed.
+--- Deduplicates contexts by label, keeping the first.
+---@param list table[]
+---@return table[]
+local function dedupe(list)
+    local out, seen = {}, {}
+    for _, ctx in ipairs(list) do
+        local key = ctx.label or ctx.text
+        if not seen[key] then
+            seen[key] = true
+            out[#out + 1] = ctx
+        end
+    end
+    return out
+end
+
+--- Contexts the next prompt will carry: the implicit current file/selection
+--- (unless skipped), those staged via pickers, and the ones resolved from `@`
+--- mentions in the text.
+---@param text string
+---@return table[]
+function M:_contexts(text)
+    local state = util.getState()
+    local list = {}
+    if not state.auto_context_skip then
+        list[#list + 1] = require("agentic.context").auto_context()
+    end
+    vim.list_extend(list, state.contexts or {})
+    return dedupe(vim.list_extend(list, require("agentic.context.mentions").resolve(text)))
+end
+
+--- Display-only version of `_contexts` (no file reads), for the chips. The
+--- auto context is included even when skipped, so it can be shown struck out.
+---@param text string
+---@return table[]
+function M:_chip_contexts(text)
+    local mentions = require("agentic.context.mentions")
+    local list = { require("agentic.context").auto_context(true) }
+    vim.list_extend(list, util.getState().contexts or {})
+    for _, m in ipairs(mentions.parse(text)) do
+        list[#list + 1] = mentions.describe(m)
+    end
+    return dedupe(list)
+end
+
+local HINT = "Ask anything…  @ context · C-x current file · S-Tab/M-m mode · C-o model · ? keys"
+
+--- Redraws the composer decorations:
+---   * a placeholder hint while the prompt is empty;
+---   * highlights on recognised `@` mentions;
+---   * one chip per attached context *below* the last line (virtual lines
+---     above line 1 are not displayed unless the window is scrolled).
 function M:_refresh_chip()
     local state = util.getState()
-    if not state.chat_buffer or not vim.api.nvim_buf_is_valid(state.chat_buffer) then
+    local bufnr = state.chat_buffer
+    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
         return
     end
 
     local ns = vim.api.nvim_create_namespace("agentic_chip")
-    vim.api.nvim_buf_clear_namespace(state.chat_buffer, ns, 0, -1)
+    vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 
-    local contexts = state.contexts or {}
-    local virt_lines = {}
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local text = table.concat(lines, "\n")
 
-    if #contexts == 0 then
-        virt_lines[1] = {
-            { "  no context staged  ",                                                    "Comment" },
-            { "  (: files  , buffers  @s scope  @v selection  @w workspace  @k keymaps)", "Comment" },
-        }
-    else
-        for _, ctx in ipairs(contexts) do
-            local kind = ctx.type or "text"
-            local desc = ctx.label or (ctx.metadata and ctx.metadata.name) or kind
-            virt_lines[#virt_lines + 1] = {
-                { "  + ",                      "Special" },
-                { string.format("[%s]", kind), "Title" },
-                { " " .. desc,                 "Comment" },
-            }
+    if vim.trim(text) == "" then
+        vim.api.nvim_buf_set_extmark(bufnr, ns, 0, 0, {
+            virt_text = { { HINT, "AgenticHint" } },
+            virt_text_pos = "overlay",
+        })
+    end
+
+    local mentions = require("agentic.context.mentions")
+    for i, line in ipairs(lines) do
+        for _, m in ipairs(mentions.parse_line(line)) do
+            pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, i - 1, m.col, {
+                end_col = m.finish,
+                hl_group = "AgenticMention",
+            })
         end
     end
 
-    -- Anchor above the first real line so the input row stays clear.
-    vim.api.nvim_buf_set_extmark(state.chat_buffer, ns, 0, 0, {
-        virt_lines = virt_lines,
-        virt_lines_above = true,
-    })
+    local context = require("agentic.context")
+    local contexts = self:_chip_contexts(text)
+    local skipped = contexts[1] and contexts[1].auto and state.auto_context_skip
+    state.update("context_count", #contexts - (skipped and 1 or 0))
+    if #contexts > 0 then
+        local chips = { { "  ", "AgenticChipSep" } }
+        for i, ctx in ipairs(contexts) do
+            local icon, icon_hl = context.icon(ctx)
+            if i > 1 then
+                chips[#chips + 1] = { "  ", "AgenticChipSep" }
+            end
+            if ctx.auto and skipped then
+                chips[#chips + 1] = { icon .. " " .. context.label(ctx), "AgenticChipOff" }
+            else
+                chips[#chips + 1] = { icon .. " ", icon_hl or "AgenticChip" }
+                chips[#chips + 1] = { context.label(ctx), ctx.auto and "AgenticChipAuto" or "AgenticChip" }
+            end
+            if ctx.auto then
+                chips[#chips + 1] = { skipped and " (off)" or " (current)", "AgenticChipSep" }
+            end
+        end
+        vim.api.nvim_buf_set_extmark(bufnr, ns, #lines - 1, 0, {
+            virt_lines = { {}, chips },
+        })
+    end
 
-    -- Keep the composer's top bar (contexts summary) in sync.
+    -- Keep the statusline's context count in sync.
     pcall(require("agentic.ui.statusline").refresh, "chat")
 end
 
@@ -195,18 +371,28 @@ function M:submit()
         return
     end
 
-    local contexts = state.contexts or {}
+    local contexts = self:_contexts(text)
 
     if state.main_buffer and vim.api.nvim_buf_is_valid(state.main_buffer) then
-        require("agentic.ui.render").user_prompt(state.main_buffer, text)
+        require("agentic.ui.render").user_prompt(state.main_buffer, text, contexts)
         require("agentic.ui.main").get():scroll_to_bottom()
     end
 
     self:_clear()
     state.clear_contexts()
+    -- A selection is a one-off; the current file keeps attaching.
+    state.update("current_selection", nil)
+    state.update("auto_context_skip", false)
     self:_refresh_chip()
 
-    api.ask(text, contexts, function(_, err)
+    -- `auto` is a local display marker, not part of the EditorContext schema.
+    local payload = vim.tbl_map(function(ctx)
+        local copy = vim.deepcopy(ctx)
+        copy.auto = nil
+        return copy
+    end, contexts)
+
+    api.ask(text, payload, function(_, err)
         if err then
             util.notify("ask failed: " .. tostring(err.message), vim.log.levels.ERROR)
             local main = util.getState().main_buffer

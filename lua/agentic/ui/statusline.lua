@@ -18,30 +18,77 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, "AgenticPadding", { link = "NormalFloat", default = true })
 end
 
+--- Plain-text pieces of the agentic status, shared by the fallback winbar and
+--- the lualine component (`lua/lualine/components/agentic.lua`).
+M.parts = {}
+
 ---@return string
-local function provider_part()
+function M.parts.provider()
   local state = util.getState()
   local provider = state.provider or config.options.provider or "?"
   local info = config.provider_info(provider)
-  local parts = { info.icon, (info.name or provider):upper() }
-  if state.model and state.model ~= "" then
-    parts[#parts + 1] = state.model
+  return string.format("%s %s", info.icon, info.name or provider)
+end
+
+---@return string
+function M.parts.model()
+  local state = util.getState()
+  return state.model_name or state.model or ""
+end
+
+---@return string
+function M.parts.mode()
+  local state = util.getState()
+  return state.mode_name or state.mode or ""
+end
+
+local spinner = { "◐", "◓", "◑", "◒" }
+
+---@return string
+function M.parts.status()
+  local state = util.getState()
+  if not state.server_ready then
+    return "○ down"
+  elseif state.streaming then
+    return spinner[math.floor(vim.uv.now() / 250) % #spinner + 1] .. " running"
   end
-  if state.mode and state.mode ~= "" then
-    parts[#parts + 1] = "(" .. state.mode .. ")"
+  return "● ready"
+end
+
+---@return string
+function M.parts.session()
+  local state = util.getState()
+  if state.session_name and state.session_name ~= "" then
+    return state.session_name
+  end
+  return state.session_id and state.session_id:sub(1, 8) or ""
+end
+
+---@return string
+function M.parts.context()
+  local n = util.getState().context_count or 0
+  if n == 0 then
+    return ""
+  end
+  return string.format("󰁦 %d", n)
+end
+
+---@return string
+local function provider_part()
+  local parts = { M.parts.provider() }
+  local model, mode = M.parts.model(), M.parts.mode()
+  if model ~= "" then
+    parts[#parts + 1] = model
+  end
+  if mode ~= "" then
+    parts[#parts + 1] = "(" .. mode .. ")"
   end
   return table.concat(parts, " ")
 end
 
 ---@return string plain status text (no highlight codes)
 local function status_text()
-  local state = util.getState()
-  if not state.server_ready then
-    return "○ DOWN"
-  elseif state.streaming then
-    return "◐ RUNNING"
-  end
-  return "● READY"
+  return M.parts.status()
 end
 
 ---@return string status with the winbar highlight applied
@@ -65,23 +112,14 @@ local function session_part()
   return table.concat(parts, " ")
 end
 
---- Summarises the staged contexts, e.g. `2 ctx: selection, file`.
+--- Summarises the attached contexts, e.g. `2 contexts`.
 ---@return string
 local function contexts_summary()
-  local state = util.getState()
-  local contexts = state.contexts or {}
-  if #contexts == 0 then
+  local n = util.getState().context_count or 0
+  if n == 0 then
     return "no context"
   end
-  local kinds, seen = {}, {}
-  for _, c in ipairs(contexts) do
-    local k = c.type or "text"
-    if not seen[k] then
-      seen[k] = true
-      kinds[#kinds + 1] = k
-    end
-  end
-  return string.format("%d ctx: %s", #contexts, table.concat(kinds, ", "))
+  return string.format("%d context%s", n, n == 1 and "" or "s")
 end
 
 --- The winbar used for agentic windows (always visible, unlike a per-window
@@ -149,11 +187,33 @@ function M.statusline()
   return left .. "%=" .. " "
 end
 
+--- Whether lualine is loaded with the `agentic` extension enabled.
+---@return boolean
+function M.lualine_active()
+  if not package.loaded["lualine"] then
+    return false
+  end
+  local ok, cfg = pcall(require("lualine").get_config)
+  if not ok or type(cfg) ~= "table" then
+    return false
+  end
+  for _, ext in ipairs(cfg.extensions or {}) do
+    if ext == "agentic" or (type(ext) == "table" and vim.tbl_contains(ext.filetypes or {}, "agentic")) then
+      return true
+    end
+  end
+  return false
+end
+
 --- Re-renders the winbar for a view. `main` shows provider/session state;
 --- `chat` shows the staged contexts (and a streaming indicator) since that is
 --- what matters while composing.
 ---@param view string -- "main" | "chat"
 function M.refresh(view)
+  -- lualine (with the `agentic` extension) owns the bars when configured.
+  if M.lualine_active() then
+    return
+  end
   local util_state = util.getState()
   local win = view == "chat" and util_state.chat_window or util_state.main_window
   if not win or not vim.api.nvim_win_is_valid(win) then

@@ -47,29 +47,100 @@ With `lazy.nvim`:
 
 ## Usage
 
-1. `:AgenticToggle` (or `<leader>ct`) opens the transcript and composer. The
-   server is started and the default provider initialised automatically, and a
-   new session is created.
-2. Type a prompt in the composer and press `<CR>` to send it.
-3. Staged context is attached to the prompt automatically.
+1. `:AgenticToggle` (or `<leader>at`) opens the transcript and composer as a
+   right-hand sidebar. The server is started and the default provider
+   initialised automatically, and a new session is created.
+2. Type a prompt in the composer and press `<CR>` to send it. While it is
+   empty, the composer shows a hint with the main keys.
+3. Attached context shows as chips under the prompt (`󰈙 chat.lua:10-20`,
+   `󰈙 README.md`, ` 3 diagnostics`) and is listed under your message in the
+   transcript once sent.
 
-### Context keys (in the composer)
+### Adding context
 
-| Key | Inserts |
-|-----|---------|
+**Automatically:** the file you were last editing is attached to every prompt
+and shown as a `(current)` chip. Its contents come from the buffer, so unsaved
+edits are included. If you open the UI from visual mode (`<leader>at` or
+`<leader>av`), only the selected lines are attached instead, for that one
+prompt. Press `<C-x>` in the composer to leave the current file out of the next
+prompt (the chip shows `(off)`), or set `auto_context = false` to turn this off
+entirely.
+
+**While typing (insert mode):** type `@` to open a completion menu (needs
+[blink.cmp](https://github.com/saghen/blink.cmp), see
+[Integrations](#integrations)):
+
+| Mention | Attaches |
+|---------|----------|
+| `@path/to/file` | the whole file |
+| `@path/to/file:10-20` / `@file:7` | just those lines |
+| `@selection` | your last visual selection (inserted as `@file:start-end`) |
+| `@diagnostics` | all current diagnostics |
+| `@workspace` | a workspace file outline |
+| `@keymaps` | your normal-mode keymaps |
+| `@image` / `@link` | opens an image picker / URL input |
+
+Mentions are plain text: they stay in the prompt, are highlighted when they
+resolve, and are read when you send (unsaved buffer contents win over disk).
+`foo@bar.com` and unknown `@names` are left alone.
+
+**Pickers (normal mode in the composer):**
+
+| Key | Picks |
+|-----|-------|
 | `:` | files (multi-select) |
 | `,` | buffers (multi-select) |
-| `@s` | tree-sitter scope at the cursor |
-| `@v` / `@visual` | the current visual selection |
-| `@w` / `@workspace` | a workspace outline |
-| `@W` / `@refresh` | rebuild the workspace outline first |
-| `@k` / `@kbd` | your normal-mode keymaps |
-| `@d` / `@db` | diagnostics |
+| `@s` | tree-sitter scope (function/class) |
+| `@v` | the last visual selection |
+| `@w` / `@W` | workspace outline (cached / rebuilt) |
+| `@k` | your normal-mode keymaps |
+| `@d` | diagnostics |
 | `@i` | an image (base64 inline) |
-| `@link` | a URL |
-| `<C-c>` | clear all staged contexts |
+| `@l` | a URL |
+| `<C-c>` | clear picker-staged contexts |
 
-From anywhere, `<leader>av` asks about the current visual selection.
+From visual mode anywhere, `<leader>av` (or `<leader>at`) opens the composer
+with the selection attached, ready for your question.
+
+### Composer keys
+
+| Key | Mode | Action |
+|-----|------|--------|
+| `<CR>` / `<C-s>` | n, i | send (`<CR>` accepts the completion item instead while the menu is open) |
+| `<C-x>` | n, i | leave the current file/selection out of the next prompt (press again to restore) |
+| `<S-Tab>` | n, i | cycle mode (selects the previous item while the completion menu is open) |
+| `<C-o>` | n, i | pick model |
+| `<M-m>` | n, i | pick mode |
+| `<M-s>` | n, i | sessions view |
+| `?` | n | show all composer keys (which-key, or a small float) |
+| `q` | n | close the UI |
+
+Rebind or disable (`false`) any of these via `composer_keys`. Globally:
+`<leader>am` model, `<leader>ao` mode, `<leader>as` sessions, `<leader>an` new
+session.
+
+### Sessions
+
+`:AgenticSessions`, `<leader>as`, `<M-s>` in the composer, or clicking the
+session name in lualine opens a picker of the sessions the server returns:
+current first, archived last, with a details pane listing what you can do.
+
+| Key | Action |
+|-----|--------|
+| `<CR>` | switch to the session (loads its history into the transcript, or resumes it) |
+| `<a-n>` | new session |
+| `<a-r>` | rename |
+| `<a-f>` | fork: continue in a copy (becomes the current session) |
+| `<a-a>` | archive / unarchive |
+| `<a-e>` | export to a file |
+| `<a-s>` | write a summary |
+| `<a-d>` | delete (asks first) |
+
+Only operations the agent supports are offered; the rest are listed as
+unavailable with the reason (e.g. an agent without `sessionCapabilities.fork`).
+This uses the `agentCapabilities` the server reports on `client/init`; with an
+older server every action is offered and refusals are reported. Without snacks,
+`vim.ui.select` picks the session and then the action.
 
 ### Commands
 
@@ -78,10 +149,10 @@ From anywhere, `<leader>av` asks about the current visual selection.
 | `:AgenticToggle` | Open/close the UI |
 | `:AgenticProvider <name>` / `:AgenticProviders` | Switch provider |
 | `:AgenticNewSession [name]` | New session |
-| `:AgenticSessions` | List/resume sessions |
+| `:AgenticSessions` | Sessions view (switch, rename, fork, archive, delete, …) |
 | `:AgenticRenameSession [name]` | Rename active session |
 | `:AgenticDeleteSession` | Delete active session |
-| `:AgenticModel` / `:AgenticMode` | Switch model / mode (config options) |
+| `:AgenticModel` / `:AgenticMode [next]` | Pick model / pick (or cycle) mode |
 | `:AgenticStats [days]` | Usage stats |
 | `:AgenticHooks` / `:AgenticReloadHooks` / `:AgenticHookToggle` | Inspect/control hooks |
 | `:AgenticSummarize` | Summarise the active session |
@@ -127,6 +198,7 @@ The server may also ask the editor to act:
 ### Modules
 
 ```
+lua/lualine/          lualine `agentic` component + extension
 lua/agentic/
   init.lua            setup()
   config.lua          defaults + server/provider config
@@ -136,6 +208,9 @@ lua/agentic/
   autocmds.lua        resize/visibility/lifecycle
   rpc/                protocol.lua, transport.lua, client.lua, api.lua, error.lua
   context/init.lua    EditorContext provider (pickers → staged contexts)
+  context/mentions.lua  `@` mention parsing/resolution
+  cmp/blink.lua       blink.cmp source for `@` mentions
+  deps/init.lua       lazy.nvim specs (incl. edgy/blink/lualine/which-key integration)
   ui/
     main.lua          transcript buffer + notification wiring
     chat.lua          composer/input buffer
@@ -144,23 +219,45 @@ lua/agentic/
     terminal.lua      agentic/terminal handling
     diff.lua          tool-call diff review
     log.lua           server log buffer
-    statusline.lua    winbar (provider/model/mode/session) + highlights
+    settings.lua      model/mode pickers and cycling
+    sessions.lua      sessions view (capability-aware actions)
+    statusline.lua    status parts + fallback winbar when lualine isn't set up
     win.lua           window base (split + floating views, padding, borders)
 ```
 
-## Statusline / winbar
+## Integrations
 
-The agentic windows render their state in the window **winbar** (so it stays
-visible even with `laststatus=3`): a title, `<icon> PROVIDER model (mode)`, a
-status dot (`● READY` / `◐ RUNNING` / `○ DOWN`), and the session name/id on the
-right. A per-window statusline is also set when `laststatus ~= 3`. If you use
-Lualine, disable it for the agentic filetypes:
+`lua/agentic/deps/init.lua` ships `optional = true` lazy.nvim specs. With
+`import = "agentic.deps"` they extend these plugins when you already have them:
+
+- **blink.cmp**: registers the `agentic` source and limits the composer
+  (`agentic_input`) to `{ "agentic", "buffer" }`. The menu auto-opens in the
+  composer even if you keep `auto_show = false` elsewhere.
+- **edgy.nvim**: docks the transcript and composer in the right edgebar.
+- **lualine.nvim**: enables the `agentic` extension. It draws the statusline
+  (title · provider · model · mode · contexts · status · session) and a header
+  per window: the transcript shows session and status, the composer shows model,
+  mode and context count. Clicking model or mode opens its picker; clicking the
+session opens the sessions view.
+- **which-key.nvim**: adds the `<leader>a` group and a composer `@` group.
+
+Not using `import`? Configure them yourself:
 
 ```lua
-require("lualine").setup {
-  options = { disabled_filetypes = { winbar = { "agentic", "agentic_input" } } },
+-- blink.cmp
+sources = {
+  providers = { agentic = { name = "Agentic", module = "agentic.cmp.blink" } },
+  per_filetype = { agentic_input = { "agentic", "buffer" } },
 }
+-- lualine
+extensions = { "agentic" }
+-- or place components anywhere:
+lualine_x = { { "agentic", item = "model" }, { "agentic", item = "mode" } }
+-- items: title, provider, model, mode, status, session, context
 ```
+
+Without lualine (or without the extension), agentic falls back to its own
+winbar: a title, `<icon> Provider model (mode)`, a status dot, and the session.
 
 ## NES (Next Edit Suggestions)
 
@@ -173,7 +270,7 @@ capability is confirmed across providers.
 ## Development
 
 ```bash
-make test          # plenary/busted suite (protocol, client, context)
+make test          # plenary/busted suite (protocol, client, context, mentions, state)
 stylua --check lua # formatting
 ```
 
@@ -198,31 +295,28 @@ require("agentic").setup({
     root = nil,
   },
   views = {
-    -- Floating windows with a real border give clear separation from the editor
-    -- and from each other. `chat` is anchored to `main` so it shares its column
-    -- and width and docks directly beneath it.
-    main = {
-      relative = "editor",
-      position = "topright",
-      border = "rounded",
-      title = " Agentic ",
-      padding = 1,
-      size = { width = 0.3, height = 0.72 },
-    },
-    chat = {
-      relative = "editor",
-      anchor = "main",
-      position = "below",
-      border = "rounded",
-      title = " Prompt ",
-      padding = 1,
-      size = { width = 0.3, height = 0.22 },
-    },
+    -- A right-hand sidebar of plain splits (edgy manages them if present).
+    -- `chat` is split from `main`, so it shares its column.
+    main = { split = "right", padding = 1, size = { width = 0.33 } },
+    chat = { anchor = "main", split = "below", padding = 1, size = { height = 0.2 } },
+  },
+  auto_context = true, -- attach the current file / opening selection
+  composer_keys = {
+    submit = { "<CR>", "<C-s>" },
+    cycle_mode = "<S-Tab>",
+    pick_model = "<C-o>",
+    pick_mode = "<M-m>",
+    sessions = "<M-s>",
+    toggle_auto_context = "<C-x>",
+    clear_contexts = "<C-c>",
+    help = "?",
+    close = "q",
   },
   keys = {}, -- extra global keymaps
 })
 ```
 
-For docked **splits** instead of floats, drop `relative`/`border`/`position` and
-set `split = "right"` on `main` and `split = "below"` (with `anchor = "main"`)
-on `chat`. `position` accepts `topright`, `right`, `below`, `floating`, etc.
+For **floats** instead of splits, set `relative = "editor"` plus `position`
+(`topright`, `right`, `below`, `floating`, …), `border` and `title` on each
+view; `chat` with `anchor = "main"` and `position = "below"` docks under the
+transcript.

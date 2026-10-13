@@ -58,6 +58,23 @@ function M.input(opts, on_choice)
   vim.ui.input(opts, on_choice)
 end
 
+--- Checks an RPC reply, notifying on failure (an RPC error or a result with
+--- `success = false`).
+---@param result table?
+---@param err table?
+---@return boolean ok
+function M.ok(result, err)
+  if err then
+    M.notify(tostring(err.message), vim.log.levels.ERROR)
+    return false
+  end
+  if result and result.success == false then
+    M.notify(tostring(result.error or "request failed"), vim.log.levels.ERROR)
+    return false
+  end
+  return true
+end
+
 --- Notify with an agentic prefix.
 ---@param message string
 ---@param level? integer

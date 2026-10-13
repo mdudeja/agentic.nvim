@@ -19,6 +19,24 @@ function M.setup()
     end,
   })
 
+  -- Follow the file buffer the user is working in; it is attached to prompts
+  -- as the "current" context. A selection only applies to the buffer it was
+  -- made in, so moving to another file drops it.
+  vim.api.nvim_create_autocmd("BufEnter", {
+    group = group,
+    callback = function(args)
+      local buf = args.buf
+      if vim.bo[buf].buftype ~= "" or not vim.bo[buf].buflisted or vim.api.nvim_buf_get_name(buf) == "" then
+        return
+      end
+      local state = util.getState()
+      if state.current_buffer ~= buf then
+        state.update("current_buffer", buf)
+        state.update("current_selection", nil)
+      end
+    end,
+  })
+
   -- Keep floating windows sized to the editor.
   vim.api.nvim_create_autocmd("VimResized", {
     group = group,

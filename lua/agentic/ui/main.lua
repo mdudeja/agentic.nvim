@@ -65,6 +65,10 @@ function M.new(opts)
       vim.wo[winnr].number = false
       vim.wo[winnr].relativenumber = false
       vim.wo[winnr].cursorline = false
+      vim.wo[winnr].statuscolumn = ""
+      vim.wo[winnr].spell = false
+      vim.wo[winnr].list = false
+      vim.wo[winnr].winfixwidth = true
     end
   end
 
@@ -121,17 +125,7 @@ end
 
 --- Mirrors `mode`/`model` out of the config options into flat state for the statusline.
 function M:_mirror_config_options()
-  local state = util.getState()
-  for _, opt in ipairs(state.config_options or {}) do
-    if opt.category == "mode" or opt.id == "mode" then
-      state.update("mode", opt.currentValue)
-    elseif opt.category == "model" or opt.id == "model" then
-      state.update("model", opt.currentValue)
-    end
-  end
-  if state.main_window and vim.api.nvim_win_is_valid(state.main_window) then
-    require("agentic.ui.statusline").refresh("main")
-  end
+  require("agentic.ui.settings").mirror()
 end
 
 --- Subscribes to server notifications exactly once.
@@ -154,6 +148,12 @@ function M:_bind_handlers()
     if kind == "config_option_update" then
       state.update("config_options", update.configOptions or {})
       self2:_mirror_config_options()
+    elseif kind == "current_mode_update" then
+      local mode_opt = require("agentic.ui.settings").find("mode")
+      if mode_opt and update.currentModeId then
+        mode_opt.currentValue = update.currentModeId
+        self2:_mirror_config_options()
+      end
     elseif kind == "available_commands_update" then
       state.update("available_commands", update.availableCommands or {})
     elseif kind == "session_info_update" and update.title then
@@ -196,14 +196,67 @@ function M:_render_welcome()
   if vim.api.nvim_buf_line_count(bufnr) > 1 then
     return
   end
-  local provider = state.provider or require("agentic.config").options.provider
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
-    "# Agentic",
-    string.format("provider: %s", provider),
+
+  local config = require("agentic.config")
+  local info = config.provider_info(state.provider or config.options.provider)
+  local keys = config.options.composer_keys or {}
+  ---@param k string|string[]|false|nil
+  local function key(k)
+    return type(k) == "table" and k[1] or k
+  end
+
+  local rows = {
+    { "@", "mention a file, buffer, @selection, @diagnostics…" },
+    { key(keys.submit), "send" },
+    { key(keys.toggle_auto_context), "skip the (current) file for one prompt" },
+    { key(keys.cycle_mode), "cycle mode" },
+    { key(keys.pick_mode), "pick mode" },
+    { key(keys.pick_model), "pick model" },
+    { key(keys.sessions), "sessions (switch, rename, fork, delete…)" },
+    { ": ,", "pick files / buffers (normal mode)" },
+    { key(keys.help), "all composer keys (normal mode)" },
+  }
+
+  local lines = {
+    string.format("# %s %s", info.icon or "", info.name or "Agentic"),
     "",
-    "Press <CR> in the composer to send. Context keys: : files, , buffers, @s scope, @v visual, @w workspace, @k keymaps.",
+    "Type in the prompt below. Attached context shows as chips under it.",
+    "",
+  }
+  local key_rows = {}
+  for _, row in ipairs(rows) do
+    if row[1] then
+      lines[#lines + 1] = string.format("  %-9s %s", row[1], row[2])
+      key_rows[#key_rows + 1] = #lines - 1
+    end
+  end
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+
+  local render = require("agentic.ui.render")
+  render.reset(bufnr)
+  local ns = vim.api.nvim_create_namespace("agentic_render")
+  vim.api.nvim_buf_set_extmark(bufnr, ns, 0, 0, { line_hl_group = "AgenticUser" })
+  vim.api.nvim_buf_set_extmark(bufnr, ns, 2, 0, { line_hl_group = "AgenticMeta" })
+  for _, row in ipairs(key_rows) do
+    vim.api.nvim_buf_set_extmark(bufnr, ns, row, 2, { end_col = 11, hl_group = "AgenticKey" })
+    vim.api.nvim_buf_set_extmark(bufnr, ns, row, 12, { end_row = row + 1, hl_group = "AgenticMeta" })
+  end
+end
+
+--- Clears the transcript for another session, leaving a one-line header.
+--- A loaded session's history then streams in below it.
+---@param header string
+function M:reset_transcript(header)
+  local bufnr = util.getState().main_buffer
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "# " .. header })
+  local render = require("agentic.ui.render")
+  render.reset(bufnr)
+  vim.api.nvim_buf_set_extmark(bufnr, vim.api.nvim_create_namespace("agentic_render"), 0, 0, {
+    line_hl_group = "AgenticUser",
   })
-  require("agentic.ui.render").reset(bufnr)
 end
 
 function M:scroll_to_bottom()
@@ -223,7 +276,8 @@ end
 ---@param opts Agentic.config.win?
 function M:toggle(opts)
   local state = util.getState()
-  if state.is_visible.main then
+  -- From visual mode, always (re)open so the selection gets attached.
+  if state.is_visible.main and not require("agentic.selection").kind(vim.fn.mode()) then
     self:hide()
   else
     self:show(opts)
@@ -234,16 +288,35 @@ end
 function M:show(opts)
   local state = util.getState()
 
-  state.update("source_buffer", vim.api.nvim_get_current_buf())
+  local buf = vim.api.nvim_get_current_buf()
+  state.update("source_buffer", buf)
   state.update("source_window", vim.api.nvim_get_current_win())
   state.update("source_cursor", vim.api.nvim_win_get_cursor(0))
+
+  -- Opened from a file: it becomes the current context. Opened from visual
+  -- mode: just the selected lines do (until sent or another file is entered).
+  if vim.bo[buf].buftype == "" and vim.api.nvim_buf_get_name(buf) ~= "" then
+    state.update("current_buffer", buf)
+    local selection = require("agentic.selection")
+    if selection.kind(vim.fn.mode()) then
+      state.update("current_selection", selection.capture())
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "nx", false)
+    end
+  end
 
   M.new(opts)
 
   if not self:valid("main") then
     return
   end
-  vim.api.nvim_set_current_win(state.main_window)
+  -- Focus the composer *from the source window*, so `<C-w>p` in the composer
+  -- returns to the code rather than to the transcript.
+  local source = state.source_window
+  if source and vim.api.nvim_win_is_valid(source) and source ~= state.chat_window then
+    vim.api.nvim_set_current_win(source)
+  else
+    vim.api.nvim_set_current_win(state.main_window)
+  end
   state.update("is_visible", { main = true })
 
   -- Open the composer for input.

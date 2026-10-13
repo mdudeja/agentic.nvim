@@ -27,6 +27,7 @@ local hl = {
   notice = "AgenticNotice",
   usage = "AgenticUsage",
   meta = "AgenticMeta",
+  attach = "AgenticAttach",
 }
 
 ---@param bufnr integer
@@ -110,10 +111,22 @@ function M.append_text(bufnr, role, text)
   hl_lines(bufnr, role_hl, from, to)
 end
 
+--- Echoes a sent prompt, followed by a dim line listing what was attached.
 ---@param bufnr integer
 ---@param text string
-function M.user_prompt(bufnr, text)
+---@param contexts table[]?
+function M.user_prompt(bufnr, text, contexts)
   M.append_text(bufnr, "user", text)
+  if contexts and #contexts > 0 then
+    local context = require("agentic.context")
+    local parts = {}
+    for _, ctx in ipairs(contexts) do
+      parts[#parts + 1] = context.icon(ctx) .. " " .. context.label(ctx) .. (ctx.auto and " (current)" or "")
+    end
+    append_lines(bufnr, { "  " .. table.concat(parts, "  ") }, hl.attach)
+    -- Make the next chunk start a fresh section rather than append to this line.
+    ensure(bufnr).role = nil
+  end
 end
 
 ---@param bufnr integer
@@ -270,9 +283,25 @@ function M.setup_highlights()
     AgenticNotice = { link = "Special" },
     AgenticUsage = { link = "Comment" },
     AgenticMeta = { link = "Comment" },
+    AgenticAttach = { link = "Comment" },
+    AgenticKey = { link = "Special" },
+    -- Composer
+    AgenticHint = { link = "Comment" },
+    AgenticMention = { link = "Special" },
+    AgenticChip = { link = "Directory" },
+    AgenticChipSep = { link = "NonText" },
+    AgenticChipAuto = { link = "Directory", italic = true },
+    AgenticChipOff = { link = "NonText", strikethrough = true },
   }
   for name, def in pairs(defs) do
-    vim.api.nvim_set_hl(0, name, def)
+    -- `link` discards other attributes, so for styled variants copy the
+    -- linked group's colours and add the style on top.
+    if def.link and vim.tbl_count(def) > 1 then
+      local base = vim.api.nvim_get_hl(0, { name = def.link, link = false })
+      def = vim.tbl_extend("force", base, def)
+      def.link = nil
+    end
+    vim.api.nvim_set_hl(0, name, vim.tbl_extend("force", def, { default = true }))
   end
 end
 

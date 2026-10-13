@@ -26,6 +26,10 @@ function M.setup()
 
   map({ "n", "v", "t" }, "<leader>at", "<cmd>AgenticToggle<CR>", { desc = "Toggle Agentic UI" })
   map("v", "<leader>av", require("agentic.context").global_visual_prompt, { desc = "Agentic: Ask about selection" })
+  map("n", "<leader>am", "<cmd>AgenticModel<CR>", { desc = "Agentic: Switch model" })
+  map("n", "<leader>ao", "<cmd>AgenticMode<CR>", { desc = "Agentic: Switch mode" })
+  map("n", "<leader>as", "<cmd>AgenticSessions<CR>", { desc = "Agentic: Sessions" })
+  map("n", "<leader>an", "<cmd>AgenticNewSession<CR>", { desc = "Agentic: New session" })
 end
 
 --- Buffer-local context picker keymaps for the composer.
@@ -36,49 +40,39 @@ function M.attach(bufnr)
   local ac = require("agentic.context")
 
   local bindings = {
-    { ":", ac.pick_files, "Agentic: Pick files" },
-    { ",", ac.pick_buffers, "Agentic: Pick buffers" },
-    { "@s", ac.pick_scope, "Agentic: Pick scope" },
-    { "@v", ac.insert_visual, "Agentic: Insert visual selection" },
-    { "@visual", ac.insert_visual, "Agentic: Insert visual selection" },
+    { ":", ac.pick_files, "Pick files" },
+    { ",", ac.pick_buffers, "Pick buffers" },
+    { "@s", ac.pick_scope, "Pick scope (function/class)" },
+    { "@v", ac.insert_visual, "Last visual selection" },
     {
       "@w",
       function()
         ac.insert_workspace(false)
       end,
-      "Agentic: Insert workspace",
-    },
-    {
-      "@workspace",
-      function()
-        ac.insert_workspace(false)
-      end,
-      "Agentic: Insert workspace",
+      "Workspace outline",
     },
     {
       "@W",
       function()
         ac.insert_workspace(true)
       end,
-      "Agentic: Refresh & insert workspace",
+      "Refresh workspace outline",
     },
-    {
-      "@refresh",
-      function()
-        ac.insert_workspace(true)
-      end,
-      "Agentic: Refresh & insert workspace",
-    },
-    { "@k", ac.insert_keymaps, "Agentic: Insert keymaps" },
-    { "@kbd", ac.insert_keymaps, "Agentic: Insert keymaps" },
-    { "@d", ac.pick_diagnostics, "Agentic: Insert diagnostics" },
-    { "@db", ac.pick_diagnostics, "Agentic: Insert diagnostics" },
-    { "@i", ac.pick_image, "Agentic: Insert image" },
-    { "@link", ac.add_link, "Agentic: Insert link" },
+    { "@k", ac.insert_keymaps, "Keymaps" },
+    { "@d", ac.pick_diagnostics, "Pick diagnostics" },
+    { "@i", ac.pick_image, "Pick image" },
+    { "@l", ac.add_link, "Link (URL)" },
   }
 
+  -- Normal mode only: in insert mode these characters are just text (use `@`
+  -- completion there instead).
   for _, b in ipairs(bindings) do
-    map({ "n", "i" }, b[1], b[2], vim.tbl_extend("force", opts, { desc = b[3] }))
+    map("n", b[1], b[2], vim.tbl_extend("force", opts, { desc = b[3] }))
+  end
+
+  local ok, wk = pcall(require, "which-key")
+  if ok and wk.add then
+    pcall(wk.add, { { "@", group = "Agentic context", buffer = bufnr } })
   end
 end
 
