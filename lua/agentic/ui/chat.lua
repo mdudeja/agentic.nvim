@@ -395,8 +395,9 @@ function M:submit()
 
     local contexts = self:_contexts(text)
 
+    local prompt_row
     if state.main_buffer and vim.api.nvim_buf_is_valid(state.main_buffer) then
-        require("agentic.ui.render").user_prompt(state.main_buffer, text, contexts)
+        prompt_row = require("agentic.ui.render").user_prompt(state.main_buffer, text, contexts)
         require("agentic.ui.main").get():scroll_to_bottom()
     end
 
@@ -415,8 +416,9 @@ function M:submit()
     end, contexts)
 
     api.ask(text, payload, function(_, err)
-        -- Unanswered permission requests died with the turn.
-        require("agentic.ui.diff").clear_reviews()
+        -- Ties the turn's checkpoint to its prompt and offers a review of
+        -- what changed (when the server's turnCheckpoint hook is on).
+        require("agentic.checkpoints").after_turn(prompt_row, text)
         if err then
             util.notify("ask failed: " .. tostring(err.message), vim.log.levels.ERROR)
             local main = util.getState().main_buffer

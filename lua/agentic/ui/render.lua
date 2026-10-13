@@ -6,7 +6,7 @@
 ---@class Agentic.ui.render
 local M = {}
 
----@type table<integer, { role: string?, tool_lines: table<string, integer>, tool_counts: table<string, integer>, tool_titles: table<string, string>? }>
+---@type table<integer, { role: string?, tool_lines: table<string, integer>, targets: table<integer, Agentic.render.target>, tool_titles: table<string, string>? }>
 local buffers = {}
 
 local headers = {
@@ -34,7 +34,7 @@ local hl = {
 local function ensure(bufnr)
   local st = buffers[bufnr]
   if not st then
-    st = { role = nil, tool_lines = {}, tool_counts = {}, targets = {} }
+    st = { role = nil, tool_lines = {}, targets = {} }
     buffers[bufnr] = st
     vim.api.nvim_buf_clear_namespace(bufnr, vim.api.nvim_create_namespace("agentic_render"), 0, -1)
   end
@@ -75,8 +75,9 @@ end
 
 ---@param bufnr integer
 function M.reset(bufnr)
-  buffers[bufnr] = { role = nil, tool_lines = {}, tool_counts = {}, targets = {} }
+  buffers[bufnr] = { role = nil, tool_lines = {}, targets = {} }
   vim.api.nvim_buf_clear_namespace(bufnr, vim.api.nvim_create_namespace("agentic_render"), 0, -1)
+  vim.api.nvim_buf_clear_namespace(bufnr, vim.api.nvim_create_namespace("agentic_hint"), 0, -1)
 end
 
 --- Appends streamed text under a role's section.
@@ -203,10 +204,15 @@ function M.chunk(bufnr, role, update)
 end
 
 --- Echoes a sent prompt, followed by a dim line listing what was attached.
+--- Always starts a new `## You` section and returns its header row
+--- (0-based), which anchors the turn (e.g. its checkpoint).
 ---@param bufnr integer
 ---@param text string
 ---@param contexts table[]?
+---@return integer
 function M.user_prompt(bufnr, text, contexts)
+  ensure(bufnr).role = nil
+  local header_row = vim.api.nvim_buf_line_count(bufnr) + 1
   M.append_text(bufnr, "user", text)
   if contexts and #contexts > 0 then
     local context = require("agentic.context")
@@ -218,6 +224,7 @@ function M.user_prompt(bufnr, text, contexts)
     -- Make the next chunk start a fresh section rather than append to this line.
     ensure(bufnr).role = nil
   end
+  return header_row
 end
 
 ---@param bufnr integer
@@ -242,20 +249,35 @@ function M.notice(bufnr, text, level)
   return row
 end
 
---- Marks a transcript line as pointing at something `<CR>` opens (a tool
---- call's diff, a pending review). Lines are only appended or rewritten in
---- place, so the row stays valid until the transcript is reset.
+---@class Agentic.render.target
+---@field checkpoint? string -- `<CR>` offers to roll back to this checkpoint
+---@field review? string -- `<CR>` reviews the changes since this checkpoint
+
+--- Marks a transcript line as pointing at something `<CR>` acts on (a
+--- turn's checkpoint, its change review). Lines are only appended or
+--- rewritten in place, so the row stays valid until the transcript is reset.
 ---@param bufnr integer
 ---@param row integer 0-based
----@param target { tool_call_id: string, path?: string }
+---@param target Agentic.render.target
 function M.mark(bufnr, row, target)
   ensure(bufnr).targets[row] = target
+end
+
+--- Shows a dim hint at the end of a transcript line (replacing an earlier
+--- one there).
+---@param bufnr integer
+---@param row integer 0-based
+---@param text string
+function M.hint(bufnr, row, text)
+  local ns = vim.api.nvim_create_namespace("agentic_hint")
+  vim.api.nvim_buf_clear_namespace(bufnr, ns, row, row + 1)
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row, 0, { virt_text = { { text, hl.meta } } })
 end
 
 --- What the line at `row` (0-based) points at, if anything.
 ---@param bufnr integer
 ---@param row integer
----@return { tool_call_id: string, path?: string }?
+---@return Agentic.render.target?
 function M.target_at(bufnr, row)
   local st = buffers[bufnr]
   return st and st.targets[row] or nil
@@ -280,9 +302,6 @@ function M.tool_call(bufnr, update)
   local icon = status == "completed" and "✔" or (status == "failed" and "✖" or "⚙")
   local line = string.format("%s %s [%s]", icon, title, status)
 
-  -- Record diffs first: they may arrive in the initial call or any update.
-  local touched = require("agentic.ui.diff").record(update)
-
   if id and st.tool_lines[id] then
     vim.api.nvim_buf_set_lines(bufnr, st.tool_lines[id], st.tool_lines[id] + 1, false, { line })
   else
@@ -290,46 +309,6 @@ function M.tool_call(bufnr, update)
     append_lines(bufnr, { "", line }, hl.tool)
     if id then
       st.tool_lines[id] = vim.api.nvim_buf_line_count(bufnr) - 1
-      M.mark(bufnr, st.tool_lines[id], { tool_call_id = id })
-    end
-  end
-
-  -- A failed (or rejected) edit was not applied and its diff is gone: say so
-  -- on its file lines rather than offer a review.
-  if status == "failed" and id then
-    local prefix = tostring(id) .. "\0"
-    for key, at in pairs(st.tool_counts) do
-      if key:sub(1, #prefix) == prefix then
-        local old = vim.api.nvim_buf_get_lines(bufnr, at, at + 1, false)[1] or ""
-        local new = old:gsub(" — <CR> to review$", " — not applied")
-        vim.api.nvim_buf_set_lines(bufnr, at, at + 1, false, { new })
-        st.targets[at] = nil
-      end
-    end
-  end
-
-  -- One summary line per file the tool call changes, updated in place as
-  -- more hunks arrive. Counts come from the real diff.
-  for _, t in ipairs(touched) do
-    local suffix = t.kind == "add" and " (new file)" or (t.kind == "delete" and " (deleted)" or "")
-    local summary = string.format(
-      "   ↳ %s%s (+%d/-%d) — <CR> to review",
-      vim.fn.fnamemodify(t.path, ":."),
-      suffix,
-      t.added,
-      t.removed
-    )
-    local key = tostring(id or title) .. "\0" .. t.path
-    local at = st.tool_counts[key]
-    if at then
-      vim.api.nvim_buf_set_lines(bufnr, at, at + 1, false, { summary })
-    else
-      st.role = nil
-      append_lines(bufnr, { summary }, hl.meta)
-      st.tool_counts[key] = vim.api.nvim_buf_line_count(bufnr) - 1
-      if id then
-        M.mark(bufnr, st.tool_counts[key], { tool_call_id = id, path = t.path })
-      end
     end
   end
 end

@@ -261,6 +261,39 @@ function M.set_hook_enabled(name, enabled, cb)
   client():request(protocol.SET_HOOK_ENABLED, { name = name, enabled = enabled }, cb)
 end
 
+--- Turn checkpoints (the server's `turnCheckpoint` hook), newest first.
+--- `result.enabled` is false when the hook is off.
+---@param session_id? string
+---@param limit? integer
+---@param cb? fun(result: table?, err: table?)
+function M.list_checkpoints(session_id, limit, cb)
+  client():request(protocol.LIST_CHECKPOINTS, { sessionId = session_id, limit = limit }, cb)
+end
+
+--- Files that differ between a checkpoint and the working tree now.
+---@param sha string
+---@param cb? fun(result: table?, err: table?)
+function M.checkpoint_changes(sha, cb)
+  client():request(protocol.CHECKPOINT_CHANGES, { sha = sha }, cb)
+end
+
+--- A file's content at a checkpoint (`content` is nil/NIL when it didn't exist).
+---@param sha string
+---@param path string relative to the repository root
+---@param cb? fun(result: table?, err: table?)
+function M.checkpoint_file(sha, path, cb)
+  client():request(protocol.CHECKPOINT_FILE, { sha = sha, path = path }, cb)
+end
+
+--- Makes the working tree (or only `paths`) match a checkpoint.
+---@param sha string
+---@param paths? string[]
+---@param cb? fun(result: table?, err: table?)
+function M.restore_checkpoint(sha, paths, cb)
+  local session_id = state.get().session_id
+  client():request(protocol.RESTORE_CHECKPOINT, { sha = sha, paths = paths, sessionId = session_id }, cb)
+end
+
 ---@param session_id string
 ---@param output_path? string
 ---@param source? string

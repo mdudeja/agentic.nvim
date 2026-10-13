@@ -14,7 +14,8 @@ and answers the server's round-trips (questions, terminals, hooks).
 
 ## Requirements
 
-- Neovim `>= 0.10` (uses `vim.json`, extmarks, `vim.text.diff`).
+- Neovim `>= 0.11` (uses `vim.json`, extmarks, `vim.text.diff`). Run
+  `:checkhealth agentic` to verify the version, server and dependencies.
 - **`agentic-acp-server`** installed and on your `PATH`. The plugin spawns it as
   `agentic-acp-server --root <workspace>` and speaks newline-delimited JSON over
   stdio.
@@ -158,38 +159,50 @@ This uses the `agentCapabilities` the server reports on `client/init`; with an
 older server every action is offered and refusals are reported. Without snacks,
 `vim.ui.select` picks the session and then the action.
 
-### Reviewing agent edits
+### Reviewing changes and rolling back
 
-Each file an agent edits gets a line under its tool call in the transcript,
-with exact `+added/-removed` counts (and `(new file)` / `(deleted)`). Press
-`<CR>` on that line to see the file's diff, or on the tool call row to see
-every file it changed (`gf` opens the file itself).
+This needs the server's `turnCheckpoint` hook. Turn it on in
+`.agentic/agentic_acp_config.json`:
 
-**Approving edits.** When the agent asks permission for an edit, a review
-window opens with the proposed diff and the choices in its footer:
+```json
+{ "hooks": { "builtin": { "turnCheckpoint": { "enabled": true, "keep": 20 } } } }
+```
 
-| Key | Answer |
+Before each of your turns, the server snapshots the whole working tree into
+git: tracked files, plus untracked files that aren't ignored. It doesn't
+touch your index, stash or branches. Two things build on these checkpoints:
+
+- **Review.** When a turn changes files, the transcript ends the turn with
+  `N files changed (+a/-r) — <CR> to review`. That covers every change made
+  on disk, whether the agent asked permission or not, and whether it came
+  from an edit tool, a shell command or a formatter. `:AgenticReview`
+  (`<leader>ad`) opens the same review for the latest turn.
+- **Rollback.** Each turn's `## You` header shows `↺ <CR> to roll back`.
+  Pressing `<CR>` there, or picking a checkpoint in `:AgenticCheckpoints`
+  (`<leader>aD`), restores the workspace to how it was before that turn.
+  Files created since are deleted. A backup checkpoint is recorded first,
+  and it appears in the same picker, so a rollback can be undone.
+
+Keys in the review window:
+
+| Key | Action |
 |-----|--------|
-| `a` | allow once |
-| `A` | always allow |
-| `r` | reject |
-| `R` | always reject |
-| `q` / `<Esc>` | decide later: the agent keeps waiting |
+| `a` / `r` | Accept / reject the hunk under the cursor |
+| `A` / `R` | Accept / reject the whole file |
+| `]h` `[h` / `]f` `[f` | Next / previous hunk / file |
+| `<CR>` | Open the file in a new tab beside its checkpoint version, in diff mode (`do`, `dp`, `]c`; `q` in the checkpoint side closes the tab) |
+| `<C-l>` | Reload the list from the server |
+| `q` / `<Esc>` | Close |
 
-To come back to a request you deferred, press `<CR>` on its `Q: Permission
-Requested …` line (or the edit's lines) in the transcript, `<leader>ad`, or
-`:AgenticDiff`. Options an agent adds beyond those four get `1`, `2`, ….
-Approval covers the whole tool call; ACP has no per-hunk accept, and an edit
-the agent has already applied can't be rejected from here. Permission requests
-that aren't edits (e.g. running a command) use a picker instead.
+The changes are already on disk, so accepting just hides a hunk.
 
-`:AgenticDiff` (`<leader>ad`) shows the pending review or else the latest edit;
-`:AgenticDiffs` (`<leader>aD`) picks from every edit this
-session (newest first, with a preview). Rejected or failed edits are dropped;
-switching sessions clears the list. Each change is diffed from what the agent
-sent (`oldText` → `newText`), which works whether the agent sends a snippet
-(Claude, opencode), per-hunk patches (Codex) or whole files (Gemini); line
-numbers are matched against the file when the text can be found.
+Rejecting a hunk writes the checkpoint's lines back into the file and saves
+it. If the file's buffer has unsaved changes, the hunk is reverted in the
+buffer only. Rejecting a file restores it, or deletes it if the turn created
+it. New, deleted and binary files are reviewed as a whole.
+
+Permission requests, edits included, use a plain picker. Review what an edit
+did after the turn instead.
 
 ### Commands
 
@@ -210,7 +223,8 @@ numbers are matched against the file when the text can be found.
 | `:AgenticSummarize` | Summarise the active session |
 | `:AgenticExport [path]` / `:AgenticImport <file>` | Export/import sessions |
 | `:AgenticContexts` / `:AgenticClearContexts` | Inspect/clear staged context |
-| `:AgenticDiff` / `:AgenticDiffs` (`:AgenticDiff!`) | Review the latest agent edit / pick from all edits this session |
+| `:AgenticReview [sha]` | Review the changes since the latest turn checkpoint, or since the checkpoint `sha` |
+| `:AgenticCheckpoints` / `:AgenticRollback [sha]` | Checkpoint picker: `<CR>` rolls back, `<C-r>` reviews / roll back to `sha` directly |
 | `:AgenticLog` | Open the server log buffer |
 | `:AgenticDispose` | Shut the server down |
 

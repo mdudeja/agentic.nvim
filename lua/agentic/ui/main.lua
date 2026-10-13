@@ -74,7 +74,7 @@ function M.new(opts)
 
   if not vim.b[bufnr].agentic_keys then
     vim.b[bufnr].agentic_keys = true
-    vim.keymap.set("n", "<CR>", M.activate, { buffer = bufnr, desc = "Agentic: Review edit / open file under cursor" })
+    vim.keymap.set("n", "<CR>", M.activate, { buffer = bufnr, desc = "Agentic: Roll back / review / open file" })
     vim.keymap.set("n", "gf", M.open_under_cursor, { buffer = bufnr, desc = "Agentic: Open file/link under cursor" })
   end
 
@@ -88,24 +88,19 @@ function M.new(opts)
   return self
 end
 
---- `<CR>` in the transcript: on an edit (tool call row, `↳ file` line or its
---- permission question) opens the review if one is pending, else the diff;
+--- `<CR>` in the transcript: on a turn's `## You` header offers to roll
+--- back to its checkpoint, on a "files changed" line opens the review;
 --- anywhere else opens the file under the cursor.
 function M.activate()
   local row = vim.api.nvim_win_get_cursor(0)[1] - 1
   local target = require("agentic.ui.render").target_at(vim.api.nvim_get_current_buf(), row)
-  if target then
-    local diff = require("agentic.ui.diff")
-    if diff.open_review(target.tool_call_id) then
-      return
-    end
-    local groups = vim.tbl_filter(function(g)
-      return not target.path or g.path == target.path
-    end, diff.groups(target.tool_call_id))
-    if #groups > 0 then
-      diff.show(groups)
-      return
-    end
+  if target and target.review then
+    require("agentic.ui.review").open(target.review)
+    return
+  end
+  if target and target.checkpoint then
+    require("agentic.checkpoints").rollback(target.checkpoint)
+    return
   end
   M.open_under_cursor()
 end
@@ -348,7 +343,6 @@ function M:reset_transcript(header)
   if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
-  require("agentic.ui.diff").clear()
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "# " .. header })
   local render = require("agentic.ui.render")
   render.reset(bufnr)

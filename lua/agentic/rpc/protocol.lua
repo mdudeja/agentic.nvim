@@ -48,6 +48,10 @@ local M = {}
 ---| "client/list_hooks"
 ---| "client/reload_hooks"
 ---| "client/set_hook_enabled"
+---| "client/list_checkpoints"
+---| "client/checkpoint_changes"
+---| "client/checkpoint_file"
+---| "client/restore_checkpoint"
 ---| "client/terminal"
 ---| "client/nes_start"
 ---| "client/nes_suggest"
@@ -97,6 +101,10 @@ M.client_methods = {
   LIST_HOOKS = "client/list_hooks",
   RELOAD_HOOKS = "client/reload_hooks",
   SET_HOOK_ENABLED = "client/set_hook_enabled",
+  LIST_CHECKPOINTS = "client/list_checkpoints",
+  CHECKPOINT_CHANGES = "client/checkpoint_changes",
+  CHECKPOINT_FILE = "client/checkpoint_file",
+  RESTORE_CHECKPOINT = "client/restore_checkpoint",
   TERMINAL = "client/terminal",
   NES_START = "client/nes_start",
   NES_SUGGEST = "client/nes_suggest",

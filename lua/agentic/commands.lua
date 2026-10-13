@@ -267,17 +267,25 @@ function M.setup()
     end)
   end, { desc = "Agentic: Dispose the server" })
 
-  vim.api.nvim_create_user_command("AgenticDiff", function(opts)
-    if opts.bang then
-      require("agentic.ui.diff").pick()
+  vim.api.nvim_create_user_command("AgenticReview", function(opts)
+    if opts.args ~= "" then
+      require("agentic.ui.review").open(opts.args)
     else
-      require("agentic.ui.diff").open_last()
+      require("agentic.ui.review").open_latest()
     end
-  end, { bang = true, desc = "Agentic: Review the latest agent diff (! to pick from all)" })
+  end, { nargs = "?", desc = "Agentic: Review changes since the latest turn checkpoint (or the given sha)" })
 
-  vim.api.nvim_create_user_command("AgenticDiffs", function()
-    require("agentic.ui.diff").pick()
-  end, { desc = "Agentic: Pick from all agent diffs this session" })
+  vim.api.nvim_create_user_command("AgenticCheckpoints", function()
+    require("agentic.ui.checkpoints").open()
+  end, { desc = "Agentic: Pick a turn checkpoint to roll back to or review" })
+
+  vim.api.nvim_create_user_command("AgenticRollback", function(opts)
+    if opts.args ~= "" then
+      require("agentic.checkpoints").rollback(opts.args)
+    else
+      require("agentic.ui.checkpoints").open()
+    end
+  end, { nargs = "?", desc = "Agentic: Roll the workspace back to a checkpoint (picker without a sha)" })
 end
 
 return M
