@@ -29,10 +29,16 @@ function M.handle(data)
     state.pending_questions[question_id] = { question = question, options = options }
   end
 
+  -- With options, the question's first line is the question; the rest is a
+  -- text-terminal rendering of the options (and "enter the number…"), which
+  -- the picker replaces.
+  local has_options = options and #options > 0
+  local title = has_options and question:match("^[^\n]*") or question
+
   -- Mirror the question into the transcript so it is not lost.
   local main = util.getState().main_buffer
   if main and vim.api.nvim_buf_is_valid(main) then
-    require("agentic.ui.render").notice(main, "Q: " .. question, "warn")
+    require("agentic.ui.render").notice(main, "Q: " .. title, "warn")
   end
 
   -- A permission request for an edit: show the proposed diff while asking.
@@ -50,9 +56,9 @@ function M.handle(data)
     end
   end
 
-  if options and #options > 0 then
+  if has_options then
     util.select(options, {
-      prompt = question,
+      prompt = title,
       format_item = function(opt)
         if opt.description then
           return string.format("%s — %s", opt.label or opt.id, opt.description)
@@ -70,7 +76,8 @@ function M.handle(data)
     return
   end
 
-  util.input({ prompt = question }, function(value)
+  -- Prompts are single-line; the full question is in the transcript.
+  util.input({ prompt = question:match("([^\n]*)%s*$") }, function(value)
     -- Free text can't be classified here; the tool call's final status decides.
     settle(value and value ~= "" and "answered" or nil)
     respond(question_id, value or "")

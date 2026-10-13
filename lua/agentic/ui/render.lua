@@ -225,7 +225,18 @@ end
 ---@param level? "info" | "warn" | "error"
 function M.notice(bufnr, text, level)
   local prefix = level == "error" and "✖ " or (level == "warn" and "▲ " or "• ")
-  append_lines(bufnr, { "", prefix .. text }, hl.notice)
+  -- Buffer lines can't contain newlines; continuation lines align under the text.
+  local lines = vim.split(tostring(text):gsub("\n+$", ""), "\n", { plain = true })
+  local indent = string.rep(" ", vim.fn.strdisplaywidth(prefix))
+  for i, line in ipairs(lines) do
+    if i == 1 then
+      lines[i] = prefix .. line
+    elseif line ~= "" then
+      lines[i] = indent .. line
+    end
+  end
+  table.insert(lines, 1, "")
+  append_lines(bufnr, lines, hl.notice)
 end
 
 --- Renders a tool call or tool-call update, updating the existing row in place.
